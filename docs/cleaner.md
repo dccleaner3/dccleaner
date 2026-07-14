@@ -22,7 +22,7 @@
 >
 > **iOS용 앱은 제공되지 않습니다.**
 >
-> 대신 PC에서 **BlueStacks**, **LDPlayer** 같은 안드로이드 앱플레이어를 사용하면 실행할 수 있습니다.
+> 대신 PC에서 **BlueStacks**, **LDPlayer** 같은 Android 앱플레이어를 사용하면 실행할 수 있습니다.
 
 GitHub Releases에서 최신 APK를 다운로드하여 설치하면 됩니다.
 
@@ -32,7 +32,7 @@ GitHub Releases에서 최신 APK를 다운로드하여 설치하면 됩니다.
 
 ## 1.1 PC에서 사용하기
 
-PC에서는 **BlueStacks**, **LDPlayer** 같은 안드로이드 앱플레이어로 사용할 수 있습니다.
+PC에서는 **BlueStacks**, **LDPlayer** 같은 Android 앱플레이어로 사용할 수 있습니다.
 
 저는 **BlueStacks**로 설치해서 사용했습니다.
 
@@ -104,11 +104,11 @@ PC에서는 **BlueStacks**, **LDPlayer** 같은 안드로이드 앱플레이어�
 >
 > API Key만 등록하면 캡챠를 자동으로 해결할 수 있습니다.
 
-- 최소 충전 금액 : 약 **3달러**
-- 평균 비용 : **약 2원 / 1회**
+- 최소 충전 금액 : 약 **4,500원**
+- 평균 비용 : **약 3원 / 1회**
 - 평균적으로 **약 200개 삭제마다 한 번** 캡챠가 발생합니다.
 
-2Captcha 사이트에서 API Key를 발급받은 뒤
+[2Captcha 사이트](https://2captcha.com/auth/register/?from=26177187)에서 API Key를 발급받은 뒤
 
 ```
 설정 → 2Captcha API Key → 키 확인
@@ -120,9 +120,11 @@ PC에서는 **BlueStacks**, **LDPlayer** 같은 안드로이드 앱플레이어�
 
 <summary><b>왜 2Captcha를 사용하는 것이 좋나요?</b></summary>
 
-- 삭제 중 앱을 계속 볼 필요가 없습니다.
-- 캡챠를 자동으로 해결합니다.
-- 평균적으로 매우 적은 비용으로 사용할 수 있습니다.
+<ul>
+  <li>삭제 중 앱을 계속 볼 필요가 없습니다.</li>
+  <li>캡챠를 자동으로 해결합니다.</li>
+  <li>평균적으로 매우 적은 비용으로 사용할 수 있습니다.</li>
+</ul>
 
 </details>
 
