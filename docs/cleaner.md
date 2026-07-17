@@ -1,13 +1,14 @@
-# 📱 디시 클리너 모바일
+# 📱 디시 클리너 모바일 & PC
 
-기존 PC 버전 클리너를 기반으로 제작된 Android용 디시인사이드 게시글·댓글 삭제 앱입니다.
+Android, Windows, macOS용 디시인사이드 게시글·댓글 삭제 프로그램입니다.
+
+클리너 엔진에는 [dlcjsdltlq/dcinside-cleaner](https://github.com/dlcjsdltlq/dcinside-cleaner)의 로직을 활용했으며, Android·Windows·macOS 환경에 맞게 재구성했습니다.
 
 ---
 
 ## 📑 목차
 
 - [1. 다운로드](#1-다운로드)
-  - [1.1 PC에서 사용하기](#11-pc에서-사용하기)
 - [2. 로그인](#2-로그인)
 - [3. 삭제 시작](#3-삭제-시작)
 - [4. 캡챠 해결](#4-캡챠-해결)
@@ -18,27 +19,13 @@
 
 > **📌 참고**
 >
-> 이 앱은 **Android용 APK**로 제공됩니다.
+> Android, Windows, macOS를 지원합니다.
 >
 > **iOS용 앱은 제공되지 않습니다.**
->
-> 대신 PC에서 **BlueStacks**, **LDPlayer** 같은 Android 앱플레이어를 사용하면 실행할 수 있습니다.
 
-GitHub Releases에서 최신 APK를 다운로드하여 설치하면 됩니다.
+GitHub Releases에서 최신 버전을 다운로드하면 됩니다.
 
 ➡️ [최신 버전 다운로드](https://github.com/dccleaner3/dccleaner/releases)
-
----
-
-## 1.1 PC에서 사용하기
-
-PC에서는 **BlueStacks**, **LDPlayer** 같은 Android 앱플레이어로 사용할 수 있습니다.
-
-저는 **BlueStacks**로 설치해서 사용했습니다.
-
-1. 컴퓨터에 **BlueStacks**를 설치합니다. 보통 **5분 내외**로 끝납니다.
-2. 위에서 다운로드한 **APK 파일**을 BlueStacks 화면에 끌어다 놓습니다.
-3. 설치가 완료되면 앱을 실행합니다.
 
 ---
 
@@ -76,7 +63,7 @@ PC에서는 **BlueStacks**, **LDPlayer** 같은 Android 앱플레이어로 사�
 
 > **💡 팁**
 >
-> 삭제 작업은 백그라운드에서도 계속 진행됩니다.
+> Android에서는 삭제 작업이 백그라운드에서도 계속 진행됩니다.
 >
 > 다른 앱을 사용하거나 화면을 꺼도 삭제는 계속됩니다.
 
@@ -111,7 +98,7 @@ PC에서는 **BlueStacks**, **LDPlayer** 같은 Android 앱플레이어로 사�
 [2Captcha 사이트](https://2captcha.com/auth/register/?from=26177187)에서 API Key를 발급받은 뒤
 
 ```
-설정 → 2Captcha API Key → 키 확인
+디시 클리너 앱에서 2captcha 설정 → 키 입력 → 키 확인
 ```
 
 을 눌러 등록하면 됩니다.
@@ -132,13 +119,13 @@ PC에서는 **BlueStacks**, **LDPlayer** 같은 Android 앱플레이어로 사�
 
 ## ⚡ 삭제 속도
 
-| 항목            |                  내용 |
-| --------------- | --------------------: |
-| 삭제 속도       | 약 **1,800개 / 시간** |
-| 지원 플랫폼     |               Android |
-| 백그라운드 삭제 |                    ✅ |
-| 이어하기        |                    ✅ |
-| 2Captcha        |                    ✅ |
+| 항목            |                    내용 |
+| --------------- | ----------------------: |
+| 삭제 속도       |   약 **1,800개 / 시간** |
+| 지원 플랫폼     | Android, Windows, macOS |
+| 백그라운드 삭제 |                      ✅ |
+| 이어하기        |                      ✅ |
+| 2Captcha        |                      ✅ |
 
 ---
 

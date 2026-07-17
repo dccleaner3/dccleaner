@@ -16,13 +16,11 @@
 
 > **📌 참고**
 >
-> Android에서만 사용할 수 있습니다.
+> Android, Windows, macOS를 지원합니다.
 >
 > iOS용 앱은 제공되지 않습니다.
->
-> iPhone 사용자는 PC에서 **BlueStacks**, **LDPlayer** 등의 안드로이드 에뮬레이터를 통해 사용할 수 있습니다.
 
-GitHub Releases에서 최신 APK를 다운로드하여 설치하면 됩니다.
+GitHub Releases에서 최신 버전을 다운로드하면 됩니다.
 
 ➡️ [최신 버전 다운로드](https://github.com/dccleaner3/dccleaner/releases)
 
