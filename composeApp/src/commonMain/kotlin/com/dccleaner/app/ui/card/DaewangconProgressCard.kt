@@ -58,9 +58,23 @@ fun DaewangconProgressCard(
         progressContent = {
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("글: $postCount/10", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text("댓글: $commentCount/20", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text(
+                        "글: ${postCount}개",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        "댓글: ${commentCount}개",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "달성 기준은 디시 서버 설정을 사용합니다",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = uiColors.primary
+                )
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { progress },

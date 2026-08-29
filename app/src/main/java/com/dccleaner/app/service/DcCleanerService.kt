@@ -10,6 +10,7 @@ import android.os.SystemClock
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskState
 import com.dccleaner.app.network.Cleaner
+import com.dccleaner.app.runtime.DaewangconRunner
 import com.dccleaner.app.runtime.DccleanerExecutionEngine
 import com.dccleaner.app.runtime.GuestbookExecutionProgress
 import com.dccleaner.app.runtime.GuestbookExecutionRunner
@@ -55,6 +56,7 @@ class DcCleanerService : Service() {
     private lateinit var notifier: DcCleanerNotifier
     private lateinit var wakeLockManager: WakeLockManager
     private lateinit var engine: DccleanerExecutionEngine
+    private lateinit var daewangconRunner: DaewangconRunner
     private var notificationUpdateJob: Job? = null
     private var stateMonitorJob: Job? = null
     private var guestbookJob: Job? = null
@@ -110,19 +112,19 @@ class DcCleanerService : Service() {
     val captchaFlag: StateFlow<Boolean>
         get() = engine.captchaFlag
     val isDaewangconRunning: StateFlow<Boolean>
-        get() = engine.isDaewangconRunning
+        get() = daewangconRunner.isRunning
     val isDaewangconCompleted: StateFlow<Boolean>
-        get() = engine.isDaewangconCompleted
+        get() = daewangconRunner.isCompleted
     val daewangconErrorMessage: StateFlow<String?>
-        get() = engine.daewangconErrorMessage
+        get() = daewangconRunner.errorMessage
     val daewangconProgress: StateFlow<Float>
-        get() = engine.daewangconProgress
+        get() = daewangconRunner.progress
     val daewangconLog: StateFlow<List<String>>
-        get() = engine.daewangconLog
+        get() = daewangconRunner.logs
     val daewangconPostCount: StateFlow<Int>
-        get() = engine.daewangconPostCount
+        get() = daewangconRunner.postCount
     val daewangconCommentCount: StateFlow<Int>
-        get() = engine.daewangconCommentCount
+        get() = daewangconRunner.commentCount
 
     inner class LocalBinder : Binder() {
         fun getService(): DcCleanerService = this@DcCleanerService
@@ -137,9 +139,15 @@ class DcCleanerService : Service() {
         notifier = DcCleanerNotifier(applicationContext)
         wakeLockManager = WakeLockManager(applicationContext)
         notifier.createNotificationChannel()
+        val runtimeLogSink = RuntimeLogSink { tag, message -> logManager.addLog(tag, message) }
         engine = DccleanerExecutionEngine(
             deleteTaskStore = deleteTaskStore,
-            logSink = RuntimeLogSink { tag, message -> logManager.addLog(tag, message) },
+            logSink = runtimeLogSink,
+            notifier = AndroidEngineNotifier(),
+            scope = serviceScope
+        )
+        daewangconRunner = DaewangconRunner(
+            logSink = runtimeLogSink,
             notifier = AndroidEngineNotifier(),
             scope = serviceScope
         )
@@ -205,12 +213,16 @@ class DcCleanerService : Service() {
         cancelNotificationUpdate()
         stateMonitorJob?.cancel()
         guestbookJob?.cancel()
+        daewangconRunner.close()
         engine.close()
         wakeLockManager.release()
         serviceScope.cancel()
     }
 
-    fun setCleaner(cleaner: Cleaner) = engine.setCleaner(cleaner)
+    fun setCleaner(cleaner: Cleaner) {
+        engine.setCleaner(cleaner)
+        daewangconRunner.setCleaner(cleaner)
+    }
 
     fun prepareDaewangcon(
         cleaner: Cleaner,
@@ -306,6 +318,7 @@ class DcCleanerService : Service() {
         if (!isDaewangconRunning.value) stopSelf()
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun startDaewangcon(
         galleryId: String,
         postNo: String,
@@ -317,12 +330,12 @@ class DcCleanerService : Service() {
         daewangconNotificationDismissed = false
         markDaewangconActive(true)
         notifier.updateDaewangconNotification()
-        engine.startDaewangcon(galleryId, postNo, postSubject, postContent, commentContent)
+        daewangconRunner.start()
     }
 
     fun stopDaewangcon() {
         preparedDaewangcon = null
-        engine.stopDaewangcon()
+        daewangconRunner.stop()
         markDaewangconActive(false)
         if (!isDeleting.value) {
             cancelNotificationUpdate()
@@ -335,7 +348,7 @@ class DcCleanerService : Service() {
 
     fun dismissDaewangconNotification() {
         daewangconNotificationDismissed = true
-        engine.acknowledgeDaewangconResult()
+        daewangconRunner.acknowledgeResult()
         notifier.cancelNotification()
         if (!isDeleting.value && !isDaewangconRunning.value && !isGuestbookSending.value) stopSelf()
     }
@@ -398,7 +411,7 @@ class DcCleanerService : Service() {
         val prepared = preparedDaewangcon
         preparedDaewangcon = null
         if (prepared == null) {
-            engine.interruptDaewangcon("대왕콘 작업 시작 정보를 불러오지 못했습니다.")
+            daewangconRunner.interrupt("대왕콘 작업 시작 정보를 불러오지 못했습니다.")
             markDaewangconActive(false)
             cancelNotificationUpdate()
             wakeLockManager.release()
@@ -416,7 +429,7 @@ class DcCleanerService : Service() {
                 prepared.commentContent
             )
         } catch (e: RuntimeException) {
-            engine.interruptDaewangcon("대왕콘 작업을 시작하지 못했습니다: ${e.message ?: "알 수 없는 오류"}")
+            daewangconRunner.interrupt("대왕콘 작업을 시작하지 못했습니다: ${e.message ?: "알 수 없는 오류"}")
             markDaewangconActive(false)
             cancelNotificationUpdate()
             wakeLockManager.release()
@@ -572,7 +585,7 @@ class DcCleanerService : Service() {
     private fun recoverInterruptedDaewangconIfNeeded() {
         if (!servicePreferences.getBoolean(KEY_DAEWANGCON_ACTIVE, false)) return
         markDaewangconActive(false)
-        engine.interruptDaewangcon(DAEWANGCON_RECOVERY_FAILURE_MESSAGE)
+        daewangconRunner.interrupt(DAEWANGCON_RECOVERY_FAILURE_MESSAGE)
         notifier.showDaewangconFailedNotification()
     }
 
@@ -588,7 +601,7 @@ class DcCleanerService : Service() {
             )
         }
         if (isDaewangconRunning.value) {
-            engine.interruptDaewangcon(DAEWANGCON_TIMEOUT_MESSAGE)
+            daewangconRunner.interrupt(DAEWANGCON_TIMEOUT_MESSAGE)
             markDaewangconActive(false)
             if (!daewangconNotificationDismissed) notifier.showDaewangconFailedNotification()
         }

@@ -51,16 +51,6 @@ fun DaewangconCard(
         } else {
             "대기 없이"
         }
-    val postWaitMillis =
-        DaewangconDefaults.POST_INTERVAL_DELAY_MILLIS * 9L +
-            DaewangconDefaults.POST_BATCH_DELAY_MILLIS *
-            (9L / DaewangconDefaults.POST_BATCH_SIZE)
-    val commentWaitMillis =
-        DaewangconDefaults.COMMENT_INTERVAL_DELAY_MILLIS * 19L +
-            DaewangconDefaults.COMMENT_BATCH_DELAY_MILLIS *
-            (19L / DaewangconDefaults.COMMENT_BATCH_SIZE)
-    val fixedWaitMillis = maxOf(postWaitMillis, commentWaitMillis)
-    val estimatedMinutes = (fixedWaitMillis + 59_999L) / 60_000L
     val primaryColor = uiColors.primary
     val cardColor = uiColors.card
 
@@ -98,12 +88,12 @@ fun DaewangconCard(
                 Spacer(Modifier.height(16.dp))
 
                 Text(
-                    "글 10개와 댓글 20개를 동시에 자동 작성합니다\n" +
+                    "디시 서버에서 오늘 작성량과 달성 기준을 확인해 부족분만 자동 작성합니다\n" +
                         "글은 $postIntervalWait 간격으로, 댓글은 $commentIntervalDescription 작성하며, " +
                         "글 ${DaewangconDefaults.POST_BATCH_SIZE}개마다 $postBatchWait, " +
                         "댓글 ${DaewangconDefaults.COMMENT_BATCH_SIZE}개마다 " +
                         "$commentBatchWait 대기합니다\n" +
-                        "동시 처리 기준 약 ${estimatedMinutes}분이 소요됩니다",
+                        "소요 시간은 서버 달성 기준과 현재 작성량에 따라 달라집니다",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

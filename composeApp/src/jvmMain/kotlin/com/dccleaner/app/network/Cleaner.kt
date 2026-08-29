@@ -434,7 +434,7 @@ class Cleaner private constructor(
                         createLoginBoxHeaders(),
                         formBody
                     )
-                    execute(loginRequest).close() // 응답만 소비
+                    execute(loginRequest).close()
 
 
                     val checkRequest = buildRequest(loginBoxUrl, createLoginBoxHeaders())
@@ -592,7 +592,7 @@ class Cleaner private constructor(
                                 debugLogger.d("Cleaner", "Delete result: SUCCESS (or already deleted)")
                                 logSink?.addLog("Cleaner", "삭제 성공 - postNo: $postNo ${if (isAlreadyDeleted) "(이미 삭제됨)" else ""}")
                                 requestSuccessful = true
-                                break // 성공했으므로 루프 종료
+                                break
                             } else {
                                 logSink?.addLog("Cleaner", "삭제 실패 응답 - result: $result, msg: $msg")
                             }
@@ -735,13 +735,10 @@ class Cleaner private constructor(
                 val postUrl = linkElement?.attr("href")
 
                 if (postNoAttr.isNotEmpty()) {
-                    // URL 정보만 저장 (postList는 aggregatePosts에서 추가)
                     if (postUrl != null && postUrl.isNotEmpty()) {
                         postUrlMap[postNoAttr] = postUrl
                     }
-                    // DCcon 여부 저장 (comment_dccon 클래스 존재 여부)
                     postDcconMap[postNoAttr] = linkElement?.selectFirst(".comment_dccon") != null
-                    // 게시글은 제목, 댓글은 댓글 내용을 저장
                     postTextMap[postNoAttr] = gallogListItemText(linkElement, postType)
                     parseGallogDate(linkElement?.selectFirst(".date")?.text())?.let { date ->
                         postDateMap[postNoAttr] = date
@@ -858,9 +855,6 @@ class Cleaner private constructor(
         }
     }
 
-    /**
-     * 글의 상세 정보 (추천 수, 댓글 수) 가져오기
-     */
     override suspend fun getPostDetails(postUrl: String): PostDetails? = withContext(Dispatchers.IO) {
         try {
             val request = buildRequest(postUrl)
@@ -881,7 +875,6 @@ class Cleaner private constructor(
                 val recommendElement = doc.selectFirst(".fr .gall_reply_num")
                 val commentElement = doc.selectFirst(".fr .gall_comment a")
 
-                // 로그인/차단 페이지처럼 상세 정보 DOM 자체가 없으면 0으로 간주하지 않는다.
                 if (recommendElement == null && commentElement == null) {
                     debugLogger.w("Cleaner", "Post details DOM not found - URL: $postUrl")
                     return@withContext null
@@ -905,9 +898,6 @@ class Cleaner private constructor(
         }
     }
 
-    /**
-     * 글의 작성자 UID 가져오기 (내 글 필터용)
-     */
     override suspend fun getPostWriterUid(postUrl: String): String? = withContext(Dispatchers.IO) {
         try {
             val request = buildRequest(postUrl)
@@ -972,8 +962,8 @@ class Cleaner private constructor(
             logSink?.addLog("Cleaner", "2Captcha 해결 시작 - URL: $pageUrl")
             try {
                 val solver = TwoCaptcha(twocaptchaKey)
-                solver.setDefaultTimeout(180) // 2captcha 타임아웃 180초로 증가
-                solver.setPollingInterval(10) // 폴링 간격 10초로 증가
+                solver.setDefaultTimeout(180)
+                solver.setPollingInterval(10)
 
                 val captcha = ReCaptcha()
                 captcha.setSiteKey(DCINSIDE_SITE_KEY)
@@ -987,7 +977,7 @@ class Cleaner private constructor(
                 debugLogger.d("Cleaner", "2Captcha solved token length=${captcha.code?.length ?: 0}")
                 logSink?.addLog("Cleaner", "2Captcha 해결 완료 - 토큰 길이: ${captcha.code?.length ?: 0}")
 
-                return@withContext captcha.code // 2captcha가 준 토큰
+                return@withContext captcha.code
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -997,9 +987,6 @@ class Cleaner private constructor(
             }
         }
 
-    /**
-     * 디시인사이드 갤러리에 글 작성 (모바일 API 사용)
-     */
     override suspend fun writePost(
         galleryId: String,
         subject: String,
@@ -1012,7 +999,6 @@ class Cleaner private constructor(
 
             debugLogger.d("Cleaner", "Write post request prepared for gallery=$galleryId")
 
-            // 1단계: 글쓰기 페이지에서 CSRF 토큰과 히든 필드 수집
             val writePageRequest = buildRequest(
                 url = writeUrl,
                 headers = mapOf(
@@ -1026,13 +1012,11 @@ class Cleaner private constructor(
             val html = writePageResponse.body.string()
             val doc = Jsoup.parse(html)
 
-            // CSRF 토큰 추출
             val csrfToken = doc.select("meta[name=csrf-token]").attr("content")
             if (csrfToken.isEmpty()) {
                 return@withContext WriteResult.Failed("CSRF 토큰을 찾을 수 없습니다")
             }
 
-            // 폼 필드 수집
             val fields = mutableMapOf<String, String>()
             doc.select("#writeForm input[name], #writeForm textarea[name], #writeForm select[name]")
                 .forEach { element ->
@@ -1042,13 +1026,11 @@ class Cleaner private constructor(
                     }
                 }
 
-            // 필수 필드 설정
             fields["id"] = galleryId
             fields["route_id"] = galleryId
             fields["subject"] = subject
             fields["memo"] = content
 
-            // 허니팟 필드 처리
             val honeyFieldName = fields.keys.find { it.startsWith("honey_") }
             if (honeyFieldName != null) {
                 fields["GEY3JWF"] = honeyFieldName
@@ -1056,7 +1038,6 @@ class Cleaner private constructor(
 
             val ajaxHeaders = createMobileAjaxHeaders(csrfToken, writeUrl)
 
-            // 2단계: /ajax/access에서 Block_key 획득 (dc_check2)
             val accessFormData = FormBody.Builder()
                 .add("token_verify", "dc_check2")
                 .build()
@@ -1082,7 +1063,6 @@ class Cleaner private constructor(
                 debugLogger.w("Cleaner", "Failed to parse access response", e)
             }
 
-            // 3단계: /ajax/w_filter로 스팸 필터링
             val filterFormData = FormBody.Builder()
                 .add("subject", subject)
                 .add("memo", content)
@@ -1113,7 +1093,6 @@ class Cleaner private constructor(
                 debugLogger.w("Cleaner", "Failed to parse filter response", e)
             }
 
-            // dcblock 쿠키 찾기
             val dcblockCookie = cookieManager.cookieStore.cookies
                 .find { cookie ->
                     cookie.name.length >= 30 && cookie.name.all { it.isLetterOrDigit() }
@@ -1125,7 +1104,6 @@ class Cleaner private constructor(
                 }
             }
 
-            // 4단계: 최종 폼 데이터 구성 및 전송
             val finalFormData = FormBody.Builder()
             fields.forEach { (key, value) ->
                 if (key != "files") {
@@ -1151,7 +1129,6 @@ class Cleaner private constructor(
             debugLogger.d("Cleaner", "Write post response status=${response.code}, length=${responseText.length}")
             logSink?.addLog("Cleaner", "글 작성 응답 - status: ${response.code}, 길이: ${responseText.length}")
 
-            // 응답 파싱
             val success = response.isSuccessful &&
                     (responseText.contains("등록되었습니다") || responseText.contains("refresh") || responseText.contains(
                         "url="
@@ -1174,9 +1151,6 @@ class Cleaner private constructor(
         }
     }
 
-    /**
-     * 디시인사이드 갤러리 글에 댓글 작성 (모바일 API 사용)
-     */
     override suspend fun writeComment(
         galleryId: String,
         postNo: String,
@@ -1187,7 +1161,6 @@ class Cleaner private constructor(
             val postUrl = "$MOBILE_BASE_URL/board/$galleryId/$postNo"
             val boardReferer = "$MOBILE_BASE_URL/board/$galleryId"
 
-            // 1단계: 게시글 HTML에서 CSRF 토큰과 히든 필드 수집
             val viewRequest = buildRequest(
                 url = postUrl,
                 headers = mapOf(
@@ -1201,13 +1174,11 @@ class Cleaner private constructor(
             val html = viewResponse.body.string()
             val doc = Jsoup.parse(html)
 
-            // CSRF 토큰 추출
             val csrfToken = doc.select("meta[name=csrf-token]").attr("content")
             if (csrfToken.isEmpty()) {
                 return@withContext WriteResult.Failed("CSRF 토큰을 찾을 수 없습니다")
             }
 
-            // 히든 필드 수집
             val userId = doc.select("#user_id").attr("value")
             val boardId = doc.select("#board_id").attr("value")
             val repleId = doc.select("#reple_id").attr("value")
@@ -1221,7 +1192,6 @@ class Cleaner private constructor(
 
             val ajaxHeaders = createMobileAjaxHeaders(csrfToken, postUrl)
 
-            // 2단계: /ajax/access에서 con_key 획득 (com_submit)
             val accessFormData = FormBody.Builder()
                 .add("token_verify", "com_submit")
                 .build()
@@ -1251,7 +1221,6 @@ class Cleaner private constructor(
                 return@withContext WriteResult.Failed("댓글 작성용 키(con_key)를 얻지 못했습니다")
             }
 
-            // 3단계: cmtw_chk 쿠키 설정 (TypeScript와 동일하게)
             try {
                 val cmtwChkCookie = "cmtw_chk=$conKey; Max-Age=180; Path=/"
                 val cookieUrl = java.net.HttpCookie.parse(cmtwChkCookie).firstOrNull()
@@ -1267,7 +1236,6 @@ class Cleaner private constructor(
                 debugLogger.w("Cleaner", "Failed to set cmtw_chk cookie", e)
             }
 
-            // 4단계: 댓글 작성 요청 (TypeScript와 동일한 필드 순서 및 값)
             val commentFormData = FormBody.Builder()
                 .add("comment_memo", content)
                 .add("mode", "com_write")
@@ -1286,11 +1254,9 @@ class Cleaner private constructor(
             }
             commentFormData.add("con_key", conKey)
 
-            // 허니팟 필드 추가
             val robotField = hideRobotName.ifEmpty { "bbcdd3" }
             commentFormData.add(robotField, "1")
 
-            // 갤닉 필드 추가 (TypeScript와 동일)
             if (useGallNickname.isNotEmpty()) {
                 commentFormData.add("use_gall_nickname", useGallNickname)
             }
@@ -1313,14 +1279,12 @@ class Cleaner private constructor(
             debugLogger.d("Cleaner", "Write comment response status=${response.code}, length=${responseText.length}")
             logSink?.addLog("Cleaner", "댓글 작성 응답 - status: ${response.code}, 길이: ${responseText.length}")
 
-            // 응답 파싱
             var success = false
             try {
                 val responseData = Json.parseToJsonElement(responseText).jsonObject
                 val result = responseData["result"]?.toString()?.trim('\"')
                 success = result == "1" || result == "true"
             } catch (e: Exception) {
-                // JSON 파싱 실패시 응답 텍스트 확인
                 success = response.isSuccessful
             }
 
@@ -1341,9 +1305,6 @@ class Cleaner private constructor(
         }
     }
 
-    /**
-     * 방명록 작성
-     */
     suspend fun writeGuestbook(targetUserId: String, content: String): Boolean =
         withContext(Dispatchers.IO) {
             try {
@@ -1600,6 +1561,91 @@ class Cleaner private constructor(
     }
 
     private fun formatCount(count: Int): String = "%,d".format(Locale.KOREA, count)
+
+    override suspend fun getDaewangconProgress(): DaewangconProgress? = withContext(Dispatchers.IO) {
+        try {
+            val phpSessId = cookieManager.cookieStore.cookies
+                .find { it.name == "PHPSESSID" }
+                ?.value.orEmpty()
+            val ciT = cookieManager.cookieStore.cookies
+                .find { it.name == "ci_c" }
+                ?.value.orEmpty()
+
+            if (phpSessId.isBlank() || ciT.isBlank()) {
+                logSink?.addLog("Cleaner", "대왕콘 진행도 확인 실패 - 로그인 세션 쿠키 없음")
+                return@withContext null
+            }
+
+            val formBody = FormBody.Builder()
+                .add("ci_t", ciT)
+                .add("target", "icon")
+                .build()
+            val headers = mapOf(
+                "Accept" to "application/json, text/javascript, */*; q=0.01",
+                "Accept-Language" to "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+                "Cookie" to "ci_c=$ciT; PHPSESSID=$phpSessId;",
+                "Origin" to GALL_BASE_URL,
+                "Referer" to "$GALL_BASE_URL/",
+                "X-Requested-With" to "XMLHttpRequest"
+            )
+            val request = buildRequest(
+                url = "$GALL_BASE_URL/dccon/lists",
+                headers = headers,
+                body = formBody
+            )
+
+            execute(request).use { response ->
+                val responseText = response.body.string()
+                debugLogger.d("Cleaner", "getDaewangconProgress status=${response.code}, length=${responseText.length}")
+                if (!response.isSuccessful) {
+                    logSink?.addLog("Cleaner", "대왕콘 진행도 확인 실패 - HTTP ${response.code}")
+                    return@withContext null
+                }
+
+                val root = Json.parseToJsonElement(responseText).jsonObject
+                val bigcon = root["bigcon"]?.jsonObject ?: return@withContext null
+                val config = bigcon["config"]?.jsonObject ?: return@withContext null
+
+                val postCount = bigcon["article"]?.jsonPrimitive?.content?.toIntOrNull()
+                    ?: return@withContext null
+                val commentCount = bigcon["comment"]?.jsonPrimitive?.content?.toIntOrNull()
+                    ?: return@withContext null
+                val requiredPostCount = config["article"]?.jsonPrimitive?.content?.toIntOrNull()
+                    ?: return@withContext null
+                val requiredCommentCount = config["comment"]?.jsonPrimitive?.content?.toIntOrNull()
+                    ?: return@withContext null
+                val durationHours = config["hours"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val status = bigcon["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
+
+                if (
+                    postCount < 0 || commentCount < 0 ||
+                    requiredPostCount <= 0 || requiredCommentCount <= 0
+                ) {
+                    return@withContext null
+                }
+
+                logSink?.addLog(
+                    "Cleaner",
+                    "대왕콘 진행도 확인 - 글 $postCount/$requiredPostCount, 댓글 $commentCount/$requiredCommentCount"
+                )
+                DaewangconProgress(
+                    postCount = postCount,
+                    commentCount = commentCount,
+                    requiredPostCount = requiredPostCount,
+                    requiredCommentCount = requiredCommentCount,
+                    durationHours = durationHours,
+                    status = status
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            debugLogger.e("Cleaner", "getDaewangconProgress error", e)
+            logSink?.addLog("Cleaner", "대왕콘 진행도 확인 예외: ${e.message}")
+            null
+        }
+    }
 
     override suspend fun setBigcon(): WriteResult = withContext(Dispatchers.IO) {
         try {
