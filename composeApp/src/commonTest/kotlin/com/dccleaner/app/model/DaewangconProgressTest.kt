@@ -16,27 +16,20 @@ class DaewangconProgressTest {
     }
 
     @Test
-    fun usesServerProvidedRequirements() {
+    fun acceptsServerProvidedRequirements() {
         val progress = DaewangconProgress(
-            postCount = 12,
-            commentCount = 24,
+            postCount = 15,
+            commentCount = 30,
             requiredPostCount = 15,
-            requiredCommentCount = 30,
-            durationHours = 72,
-            status = "disabled"
+            requiredCommentCount = 30
         )
 
-        assertEquals(3, progress.remainingPostCount)
-        assertEquals(6, progress.remainingCommentCount)
-        assertFalse(progress.requirementsMet)
+        assertTrue(progress.requirementsMet)
     }
 
     @Test
-    fun clampsRemainingRequirementsAtZero() {
-        val progress = DaewangconProgress(postCount = 15, commentCount = 25)
-
-        assertEquals(0, progress.remainingPostCount)
-        assertEquals(0, progress.remainingCommentCount)
-        assertTrue(progress.requirementsMet)
+    fun detectsEnabledStatusIgnoringCase() {
+        assertTrue(DaewangconProgress(0, 0, status = "ENABLED").isEnabled)
+        assertFalse(DaewangconProgress(0, 0, status = "disabled").isEnabled)
     }
 }

@@ -1,5 +1,8 @@
 package com.dccleaner.app.platform
 
+import com.dccleaner.app.model.RemoteBannerConfig
+import com.dccleaner.app.model.ProxyCleanerPricing
+
 enum class PlatformFamily {
     Android,
     Desktop
@@ -24,3 +27,7 @@ expect val currentPlatform: RuntimePlatform
 expect fun generateDeleteTaskId(): String
 
 expect fun currentTimeMillis(): Long
+
+expect suspend fun fetchRemoteBannerConfig(): RemoteBannerConfig?
+
+expect suspend fun fetchProxyCleanerPricing(): ProxyCleanerPricing

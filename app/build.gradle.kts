@@ -18,7 +18,7 @@ android {
         applicationId = "com.dccleaner.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 200
+        versionCode = 230
         versionName = dccleanerVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -26,6 +26,9 @@ android {
 
     buildTypes {
         release {
+            vcsInfo {
+                include = false
+            }
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(

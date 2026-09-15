@@ -4,6 +4,7 @@ import com.dccleaner.app.model.CollectedPost
 import com.dccleaner.app.model.DeleteQueueCheckpoint
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskState
+import com.dccleaner.app.model.isEligibleForResume
 import com.dccleaner.app.runtime.DeleteTaskStorePort
 import com.dccleaner.app.runtime.RuntimeLogSink
 import com.dccleaner.app.runtime.RuntimeNotifier
@@ -53,9 +54,18 @@ class DesktopThemePreferenceStore(
         preferences.flush()
     }
 
+    fun getDeveloperMode(): Boolean =
+        preferences.getBoolean(KEY_DEVELOPER_MODE, false)
+
+    fun saveDeveloperMode(enabled: Boolean) {
+        preferences.putBoolean(KEY_DEVELOPER_MODE, enabled)
+        preferences.flush()
+    }
+
     private companion object {
         const val KEY_DARK_THEME = "dark_theme"
         const val KEY_RECORD_GUESTBOOK_LOG = "record_guestbook_log"
+        const val KEY_DEVELOPER_MODE = "developer_mode"
     }
 }
 
@@ -73,7 +83,9 @@ class DesktopDeleteTaskStore(
 
     @Synchronized
     override fun getForLogin(loginId: String): List<DeleteTaskProgress> =
-        readTasks().filter { it.loginId == loginId }.sortedByDescending { it.updatedAt }
+        readTasks()
+            .filter { it.loginId == loginId && it.state.isEligibleForResume() }
+            .sortedByDescending { it.updatedAt }
 
     @Synchronized
     override fun get(taskId: String): DeleteTaskProgress? = readTasks().firstOrNull { it.id == taskId }
@@ -216,7 +228,7 @@ class DesktopTrayNotifier : RuntimeNotifier {
     private val trayIcon: TrayIcon? by lazy {
         if (!SystemTray.isSupported()) return@lazy null
         val image = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
-        TrayIcon(image, "디시클리너 모바일").apply {
+        TrayIcon(image, "디시클리너 모바일 & PC").apply {
             isImageAutoSize = true
             runCatching { SystemTray.getSystemTray().add(this) }
         }

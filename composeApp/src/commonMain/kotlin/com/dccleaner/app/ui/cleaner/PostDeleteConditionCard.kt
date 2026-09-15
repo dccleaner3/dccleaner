@@ -1,7 +1,6 @@
 package com.dccleaner.app.ui.cleaner
 
-import com.dccleaner.app.model.*
-
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,30 +13,23 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapVert
-import androidx.compose.material.icons.filled.ThumbUp
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.dccleaner.app.ui.theme.dccleanerOutlinedTextFieldColors
+import com.dccleaner.app.model.UiColors
 import com.dccleaner.app.ui.theme.dccleanerSwitchColors
 
 @Composable
@@ -47,10 +39,14 @@ fun PostDeleteConditionCard(
     onMinRecommendToKeepChange: (String) -> Unit,
     minCommentToKeep: String,
     onMinCommentToKeepChange: (String) -> Unit,
+    minViewToKeep: String,
+    onMinViewToKeepChange: (String) -> Unit,
     recommendFilterEnabled: Boolean,
     onRecommendFilterEnabledChange: (Boolean) -> Unit,
     commentFilterEnabled: Boolean,
     onCommentFilterEnabledChange: (Boolean) -> Unit,
+    viewFilterEnabled: Boolean,
+    onViewFilterEnabledChange: (Boolean) -> Unit,
     postContentFilterEnabled: Boolean,
     onPostContentFilterEnabledChange: (Boolean) -> Unit,
     postContentRegex: String,
@@ -59,373 +55,187 @@ fun PostDeleteConditionCard(
     onDateFilterEnabledChange: (Boolean) -> Unit,
     deleteNewestFirst: Boolean,
     onDeleteNewestFirstChange: (Boolean) -> Unit,
+    deleteQuestionPosts: Boolean,
+    onDeleteQuestionPostsChange: (Boolean) -> Unit,
     minPostAgeDaysToDelete: String,
     onMinPostAgeDaysToDeleteChange: (String) -> Unit,
     recordGuestbookLog: Boolean,
     onRecordGuestbookLogChange: (Boolean) -> Unit,
-    onShowDeleteDialog: () -> Unit
+    onShowDeleteDialog: () -> Unit,
+    onOpenProxyCleaner: () -> Unit
 ) {
-    val primaryColor = uiColors.primary
-    val cardColor = uiColors.card
-    val usesSlowFilter = recommendFilterEnabled || commentFilterEnabled
-    val hourlyDeleteCount = if (usesSlowFilter) "900" else "1,800"
+    val activeOptions = buildList {
+        if (recommendFilterEnabled) add(DeleteFilterOption(DeleteFilterType.RECOMMEND, minRecommendToKeep.ifBlank { "1" }))
+        if (commentFilterEnabled) add(DeleteFilterOption(DeleteFilterType.COMMENT_COUNT, minCommentToKeep.ifBlank { "1" }))
+        if (viewFilterEnabled) add(DeleteFilterOption(DeleteFilterType.VIEW_COUNT, minViewToKeep.ifBlank { "1" }))
+        if (postContentFilterEnabled) add(DeleteFilterOption(DeleteFilterType.POST_TITLE_REGEX, postContentRegex))
+        if (dateFilterEnabled) add(DeleteFilterOption(DeleteFilterType.AGE_DAYS, minPostAgeDaysToDelete.ifBlank { "5" }))
+    }
+    val usesSlowFilter = recommendFilterEnabled || commentFilterEnabled || viewFilterEnabled
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(2.dp, RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
-        border = androidx.compose.foundation.BorderStroke(1.dp, uiColors.outline),
+        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(16.dp)),
+        colors = CardDefaults.cardColors(containerColor = uiColors.card),
+        border = BorderStroke(1.dp, uiColors.outline),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = primaryColor,
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(Icons.Default.Settings, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "글 삭제 조건",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("글 삭제 조건", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
-
             Spacer(Modifier.height(16.dp))
-
-            // 추천수 필터 토글
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.ThumbUp,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "추천수 필터",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Switch(
-                    checked = recommendFilterEnabled,
-                    onCheckedChange = onRecommendFilterEnabledChange,
-                    colors = dccleanerSwitchColors(uiColors)
-                )
-            }
-
-            if (recommendFilterEnabled) {
-                Spacer(Modifier.height(4.dp))
-                DeleteOptionDescription("추천수가 입력값 이상인 글은 보존합니다.")
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = minRecommendToKeep,
-                    onValueChange = { value ->
-                        if (value.isEmpty() || (value.toIntOrNull() != null && value.toInt() >= 0)) {
-                            onMinRecommendToKeepChange(value)
+            DeleteFilterOptionEditor(
+                uiColors = uiColors,
+                allowedTypes = listOf(
+                    DeleteFilterType.RECOMMEND,
+                    DeleteFilterType.COMMENT_COUNT,
+                    DeleteFilterType.VIEW_COUNT,
+                    DeleteFilterType.POST_TITLE_REGEX,
+                    DeleteFilterType.AGE_DAYS
+                ),
+                activeOptions = activeOptions,
+                summary = postDeleteConditionSummary(activeOptions),
+                onApply = { type, value ->
+                    when (type) {
+                        DeleteFilterType.RECOMMEND -> {
+                            onMinRecommendToKeepChange(value); onRecommendFilterEnabledChange(true)
                         }
-                    },
-                    label = { Text("최소 추천 수 (이상이면 보존)") },
-                    placeholder = { Text("예: 5") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.ThumbUp,
-                            contentDescription = null,
-                            tint = primaryColor
-                        )
-                    },
-                    colors = dccleanerOutlinedTextFieldColors(uiColors)
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // 댓글수 필터 토글
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Info,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "댓글수 필터",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Switch(
-                    checked = commentFilterEnabled,
-                    onCheckedChange = onCommentFilterEnabledChange,
-                    colors = dccleanerSwitchColors(uiColors)
-                )
-            }
-
-            if (commentFilterEnabled) {
-                Spacer(Modifier.height(4.dp))
-                DeleteOptionDescription("댓글수가 입력값 이상인 글은 보존합니다.")
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = minCommentToKeep,
-                    onValueChange = { value ->
-                        if (value.isEmpty() || (value.toIntOrNull() != null && value.toInt() >= 0)) {
-                            onMinCommentToKeepChange(value)
+                        DeleteFilterType.COMMENT_COUNT -> {
+                            onMinCommentToKeepChange(value); onCommentFilterEnabledChange(true)
                         }
-                    },
-                    label = { Text("최소 댓글 수 (이상이면 보존)") },
-                    placeholder = { Text("예: 5") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = null,
-                            tint = primaryColor
-                        )
-                    },
-                    colors = dccleanerOutlinedTextFieldColors(uiColors)
-                )
-            }
-
-            if (recommendFilterEnabled && commentFilterEnabled) {
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            uiColors.warning.copy(alpha = 0.16f),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = uiColors.warning,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "두 조건은 OR로 적용됩니다.\n추천수 또는 댓글수 중 하나라도 조건을 충족하면 글을 보존합니다.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = uiColors.warning
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "내용 정규식 필터",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Switch(
-                    checked = postContentFilterEnabled,
-                    onCheckedChange = onPostContentFilterEnabledChange,
-                    colors = dccleanerSwitchColors(uiColors)
-                )
-            }
-
-            if (postContentFilterEnabled) {
-                Spacer(Modifier.height(4.dp))
-                DeleteOptionDescription("정규식과 일치하는 글만 삭제합니다.")
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = postContentRegex,
-                    onValueChange = onPostContentRegexChange,
-                    label = { Text("정규식 패턴") },
-                    placeholder = { Text("예: /^.{0,1}$|test/i") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            tint = primaryColor
-                        )
-                    },
-                    colors = dccleanerOutlinedTextFieldColors(uiColors)
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "/pattern/flags 형식 또는 plain 패턴 모두 지원 (예: /^.{0,2}$/i)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // 날짜 필터 토글
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.DateRange,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "오래된 항목만 삭제",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Switch(
-                    checked = dateFilterEnabled,
-                    onCheckedChange = onDateFilterEnabledChange,
-                    colors = dccleanerSwitchColors(uiColors)
-                )
-            }
-
-            if (dateFilterEnabled) {
-                Spacer(Modifier.height(4.dp))
-                DeleteOptionDescription("입력한 일수 이상 지난 글만 삭제합니다.")
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = minPostAgeDaysToDelete,
-                    onValueChange = { value ->
-                        if (value.isEmpty() || (value.toIntOrNull() != null && value.toInt() >= 0)) {
-                            onMinPostAgeDaysToDeleteChange(value)
+                        DeleteFilterType.VIEW_COUNT -> {
+                            onMinViewToKeepChange(value); onViewFilterEnabledChange(true)
                         }
-                    },
-                    label = { Text("최소 경과 일수 (이상이면 삭제)") },
-                    placeholder = { Text("예: 5") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.DateRange,
-                            contentDescription = null,
-                            tint = primaryColor
-                        )
-                    },
-                    colors = dccleanerOutlinedTextFieldColors(uiColors)
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "이 조건은 다른 삭제 조건과 AND로 적용됩니다.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
+                        DeleteFilterType.POST_TITLE_REGEX -> {
+                            onPostContentRegexChange(value); onPostContentFilterEnabledChange(true)
+                        }
+                        DeleteFilterType.COMMENT_CONTENT_REGEX -> Unit
+                        DeleteFilterType.AGE_DAYS -> {
+                            onMinPostAgeDaysToDeleteChange(value); onDateFilterEnabledChange(true)
+                        }
+                    }
+                },
+                onRemove = { type ->
+                    when (type) {
+                        DeleteFilterType.RECOMMEND -> onRecommendFilterEnabledChange(false)
+                        DeleteFilterType.COMMENT_COUNT -> onCommentFilterEnabledChange(false)
+                        DeleteFilterType.VIEW_COUNT -> onViewFilterEnabledChange(false)
+                        DeleteFilterType.POST_TITLE_REGEX -> onPostContentFilterEnabledChange(false)
+                        DeleteFilterType.COMMENT_CONTENT_REGEX -> Unit
+                        DeleteFilterType.AGE_DAYS -> onDateFilterEnabledChange(false)
+                    }
+                }
+            )
             Spacer(Modifier.height(20.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.SwapVert,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "최근 글부터 삭제",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Switch(
-                    checked = deleteNewestFirst,
-                    onCheckedChange = onDeleteNewestFirstChange,
-                    colors = dccleanerSwitchColors(uiColors)
-                )
-            }
-            if (deleteNewestFirst) {
-                Spacer(Modifier.height(4.dp))
-                DeleteOptionDescription("한 페이지씩 불러와 바로 삭제합니다.")
-            }
-
+            NewestFirstOption(uiColors, "최근 글부터 삭제", deleteNewestFirst, onDeleteNewestFirstChange)
             Spacer(Modifier.height(20.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        primaryColor.copy(alpha = 0.08f),
-                        RoundedCornerShape(8.dp)
-                    )
-                    .padding(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "예상 삭제 속도",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "시간당 약 ${hourlyDeleteCount}개",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = primaryColor
-                    )
-                }
-                if (usesSlowFilter) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "추천수·댓글수 확인 시 처리 시간이 늘어납니다.",
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
+            QuestionPostDeleteOption(uiColors, deleteQuestionPosts, onDeleteQuestionPostsChange)
+            Spacer(Modifier.height(20.dp))
+            DeleteSpeedSummary(uiColors, if (usesSlowFilter) "900" else "1,800", usesSlowFilter)
             Spacer(Modifier.height(20.dp))
             HorizontalDivider(color = uiColors.outline)
             Spacer(Modifier.height(20.dp))
             DeleteStartControls(
-                uiColors = uiColors,
-                recordGuestbookLog = recordGuestbookLog,
-                onRecordGuestbookLogChange = onRecordGuestbookLogChange,
-                onShowDeleteDialog = onShowDeleteDialog
+                uiColors,
+                recordGuestbookLog,
+                onRecordGuestbookLogChange,
+                onShowDeleteDialog,
+                onOpenProxyCleaner
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuestionPostDeleteOption(
+    uiColors: UiColors,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Info, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("질문글도 삭제하기", fontWeight = FontWeight.Medium)
+        }
+        Switch(enabled, onEnabledChange, colors = dccleanerSwitchColors(uiColors))
+    }
+    if (enabled) DeleteOptionDescription("삭제 시 차단될 수 있다는 확인이 필요한 질문글도 삭제합니다.")
+}
+
+internal fun postDeleteConditionSummary(options: List<DeleteFilterOption>): String? {
+    if (options.isEmpty()) return null
+    val firstStage = buildList {
+        options.firstOrNull { it.type == DeleteFilterType.AGE_DAYS }
+            ?.let { add("작성 후 ${it.value}일 이상") }
+        options.firstOrNull { it.type == DeleteFilterType.POST_TITLE_REGEX }
+            ?.let { add("제목이 ‘${it.value}’ 정규식과 일치") }
+    }
+    val secondStage = options.mapNotNull {
+        when (it.type) {
+            DeleteFilterType.RECOMMEND -> "추천수 ${it.value}개 미만"
+            DeleteFilterType.COMMENT_COUNT -> "댓글수 ${it.value}개 미만"
+            DeleteFilterType.VIEW_COUNT -> "조회수 ${it.value}회 미만"
+            DeleteFilterType.POST_TITLE_REGEX, DeleteFilterType.COMMENT_CONTENT_REGEX -> null
+            else -> null
+        }
+    }
+    return when {
+        firstStage.isNotEmpty() && secondStage.isNotEmpty() ->
+            "1차 필터 · 삭제 후보\n${firstStage.joinToString(" 그리고 ")}\n\n" +
+                "2차 필터 · 최종 대상\n${secondStage.joinToString(" 그리고 ")}\n\n" +
+                "두 필터를 모두 통과한 글만 삭제합니다."
+        firstStage.isNotEmpty() -> "삭제 필터\n${firstStage.joinToString(" 그리고 ")}"
+        secondStage.isNotEmpty() -> "삭제 필터\n${secondStage.joinToString(" 그리고 ")}"
+        else -> null
+    }
+}
+
+@Composable
+internal fun NewestFirstOption(
+    uiColors: UiColors,
+    title: String,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.SwapVert, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(title, fontWeight = FontWeight.Medium)
+        }
+        Switch(enabled, onEnabledChange, colors = dccleanerSwitchColors(uiColors))
+    }
+    if (enabled) DeleteOptionDescription("한 페이지씩 불러와 바로 삭제합니다.")
+}
+
+@Composable
+internal fun DeleteSpeedSummary(uiColors: UiColors, hourlyCount: String, slow: Boolean) {
+    Column(
+        Modifier.fillMaxWidth()
+            .background(uiColors.primary.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("예상 삭제 속도", fontWeight = FontWeight.Medium)
+            Text("시간당 약 ${hourlyCount}개", fontWeight = FontWeight.Bold, color = uiColors.primary)
+        }
+        if (slow) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "추가 확인 조건 사용 시 처리 시간이 늘어납니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

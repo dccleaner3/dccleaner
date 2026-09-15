@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -46,7 +45,7 @@ fun DaewangconProgressCard(
             else -> "대왕콘 작업 중지됨"
         },
         icon = Icons.Default.Star,
-        iconTint = Color(0xFFFFD700),
+        iconTint = uiColors.primary,
         primaryColor = uiColors.primary,
         backgroundColor = uiColors.surfaceVariant,
         cardColor = uiColors.card,
@@ -58,28 +57,14 @@ fun DaewangconProgressCard(
         progressContent = {
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(
-                        "글: ${postCount}개",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        "댓글: ${commentCount}개",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Text("글: ${postCount}개", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text("댓글: ${commentCount}개", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "달성 기준은 디시 서버 설정을 사용합니다",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = uiColors.primary
-                )
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFFFFD700)
+                    color = uiColors.primary
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -102,7 +87,12 @@ fun DaewangconProgressCard(
                 onClick = if (isRunning) onStop else onClose,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isRunning) uiColors.warning else uiColors.primary
+                    containerColor = if (isRunning) uiColors.warning else uiColors.primary,
+                    contentColor = if (isRunning) {
+                        uiColors.onWarning
+                    } else {
+                        MaterialTheme.colorScheme.onPrimary
+                    }
                 ),
                 shape = RoundedCornerShape(12.dp)
             ) {

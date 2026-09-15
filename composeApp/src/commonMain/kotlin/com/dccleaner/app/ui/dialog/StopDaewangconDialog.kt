@@ -11,7 +11,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -24,7 +23,7 @@ fun StopDaewangconDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
-            Icon(Icons.Default.Warning, contentDescription = "경고", tint = uiColors.warning)
+            Icon(Icons.Default.Warning, contentDescription = "경고", tint = uiColors.warningText)
         },
         title = {
             Text(
@@ -39,10 +38,13 @@ fun StopDaewangconDialog(
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = uiColors.warning),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = uiColors.warning,
+                    contentColor = uiColors.onWarning
+                ),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("정지", color = Color.White)
+                Text("정지")
             }
         },
         dismissButton = {

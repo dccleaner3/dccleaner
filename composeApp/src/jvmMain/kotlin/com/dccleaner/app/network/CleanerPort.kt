@@ -24,9 +24,19 @@ interface CleanerPort {
     fun resetCaptchaState()
     fun getPostList(): List<String>
 
-    suspend fun deletePost(postNo: String, postType: String, solveCaptcha: Boolean = false): DeleteResult
+    suspend fun deletePost(
+        postNo: String,
+        postType: String,
+        solveCaptcha: Boolean = false,
+        deleteQuestionPosts: Boolean = false
+    ): DeleteResult
     suspend fun getPageCount(gno: String, postType: String): Int
-    suspend fun getPostList(gno: String, postType: String, page: Int): PostListResult
+    suspend fun getPostList(
+        gno: String,
+        postType: String,
+        page: Int,
+        cachePostData: Boolean = true
+    ): PostListResult
     suspend fun getPostDetails(postUrl: String): PostDetails?
     suspend fun getPostWriterUid(postUrl: String): String?
     suspend fun writePost(galleryId: String, subject: String, content: String): WriteResult

@@ -40,7 +40,7 @@ fun main(args: Array<String>) {
             Window(
                 state = windowState,
                 onCloseRequest = ::exitApplication,
-                title = "디시클리너 모바일",
+                title = "디시클리너 모바일 & PC",
                 icon = appIcon
             ) {
                 LaunchedEffect(Unit) {

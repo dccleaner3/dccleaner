@@ -8,6 +8,16 @@ fun String.isDeleteProgressLog(): Boolean =
 fun String.deleteLogDisplayText(): String =
     replace(DELETE_PROGRESS_LOG_MARKER, "").trimStart()
 
+internal fun List<String>.replaceDeleteProgressLog(timestampedMessage: String): List<String> {
+    val progressIndex = indexOfLast { it.contains(DELETE_PROGRESS_LOG_MARKER) }
+    if (progressIndex < 0) return this + timestampedMessage
+
+    return toMutableList().apply {
+        removeAt(progressIndex)
+        add(timestampedMessage)
+    }
+}
+
 internal fun deleteGalleryProgressMessage(
     deleted: Int,
     skipped: Int,
@@ -40,8 +50,11 @@ internal fun String.isDeleteGalleryCompletionLog(): Boolean {
 internal fun String.isGuestbookRunLogStart(): Boolean =
     deleteLogMessage() == "📝 방명록 가동 기록 작성 중"
 
-internal fun String.isGuestbookRunLogCompletion(): Boolean =
-    deleteLogMessage() == "✅ 방명록 가동 기록 작성 완료"
+internal fun String.isGuestbookRunLogCompletion(): Boolean {
+    val message = deleteLogMessage()
+    return message == "✅ 방명록 가동 기록 작성 완료" ||
+        message == "⚠️ 방명록 가동 기록 작성 실패"
+}
 
 private fun String.deleteLogMessage(): String =
     substringAfter("] ", this)

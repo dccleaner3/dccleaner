@@ -12,6 +12,9 @@ enum class DeleteTaskState {
     INTERRUPTED
 }
 
+fun DeleteTaskState.isEligibleForResume(): Boolean =
+    this != DeleteTaskState.PAUSED_BY_USER
+
 data class DeleteTaskProgress(
     val id: String = generateDeleteTaskId(),
     val loginId: String,
@@ -21,12 +24,15 @@ data class DeleteTaskProgress(
     @Transient val twoCaptchaApiKey: String = "",
     val recommendFilterEnabled: Boolean = false,
     val commentFilterEnabled: Boolean = false,
+    val viewFilterEnabled: Boolean = false,
     val postContentFilterEnabled: Boolean = false,
     val commentContentFilterEnabled: Boolean = false,
     val dateFilterEnabled: Boolean = false,
     val deleteNewestFirst: Boolean = false,
+    val deleteQuestionPosts: Boolean = false,
     val minRecommendToKeep: Int = -1,
     val minCommentToKeep: Int = -1,
+    val minViewToKeep: Int = -1,
     val myPostFilterEnabled: Boolean = false,
     val dcconOnlyFilterEnabled: Boolean = false,
     val postContentRegex: String = "",
@@ -48,6 +54,7 @@ data class DeleteTaskProgress(
     val collectionNextPage: Int = -1,
     val newestFirstPage: Int = 1,
     val newestFirstBatchStartDeleted: Int = 0,
+    val newestFirstTotalCount: Int = -1,
     val state: DeleteTaskState = DeleteTaskState.RUNNING,
     val statusMessage: String = "",
     val captchaRequired: Boolean = false,
@@ -57,6 +64,7 @@ data class DeleteTaskProgress(
     fun normalizedForExecution(): DeleteTaskProgress {
         val effectiveRecommendFilter = recommendFilterEnabled || minRecommendToKeep >= 0
         val effectiveCommentFilter = commentFilterEnabled || minCommentToKeep >= 0
+        val effectiveViewFilter = viewFilterEnabled
         val effectivePostContentFilter =
             postContentFilterEnabled || postContentRegex.isNotEmpty()
         val effectiveCommentContentFilter =
@@ -66,11 +74,13 @@ data class DeleteTaskProgress(
         return copy(
             recommendFilterEnabled = effectiveRecommendFilter,
             commentFilterEnabled = effectiveCommentFilter,
+            viewFilterEnabled = effectiveViewFilter,
             postContentFilterEnabled = effectivePostContentFilter,
             commentContentFilterEnabled = effectiveCommentContentFilter,
             dateFilterEnabled = effectiveDateFilter,
             deleteNewestFirst =
                 (deleteType == "posting" || deleteType == "comment") && deleteNewestFirst,
+            deleteQuestionPosts = deleteType == "posting" && deleteQuestionPosts,
             minRecommendToKeep = when {
                 minRecommendToKeep >= 0 -> minRecommendToKeep
                 effectiveRecommendFilter -> 1
@@ -79,6 +89,11 @@ data class DeleteTaskProgress(
             minCommentToKeep = when {
                 minCommentToKeep >= 0 -> minCommentToKeep
                 effectiveCommentFilter -> 1
+                else -> -1
+            },
+            minViewToKeep = when {
+                minViewToKeep >= 0 && effectiveViewFilter -> minViewToKeep
+                effectiveViewFilter -> 1
                 else -> -1
             },
             minPostAgeDaysToDelete = when {

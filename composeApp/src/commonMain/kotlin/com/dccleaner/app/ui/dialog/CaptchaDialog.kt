@@ -4,6 +4,7 @@ import com.dccleaner.app.model.*
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -22,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -31,7 +31,7 @@ fun CaptchaDialog(
     uiColors: UiColors,
     onOpenGallog: () -> Unit,
     onResolveCaptcha: () -> Unit,
-    onOpenAutoCaptchaGuide: () -> Unit
+    onOpenProxyCleaner: () -> Unit
 ) {
     val primaryColor = uiColors.primary
     val cardColor = uiColors.card
@@ -42,7 +42,7 @@ fun CaptchaDialog(
             Icon(
                 Icons.Default.Warning,
                 contentDescription = "캡챠",
-                tint = uiColors.warning,
+                tint = uiColors.warningText,
                 modifier = Modifier.size(32.dp)
             )
         },
@@ -87,10 +87,15 @@ fun CaptchaDialog(
         },
         confirmButton = {
             Column {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Button(
                         onClick = onOpenGallog,
-                        colors = ButtonDefaults.buttonColors(containerColor = uiColors.success),
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Icon(
@@ -99,26 +104,25 @@ fun CaptchaDialog(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(4.dp))
-                        Text("갤로그 열기")
+                        Text("갤로그 열기", maxLines = 1, softWrap = false)
                     }
                     Button(
                         onClick = onResolveCaptcha,
+                        modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("캡챠 해결 완료")
+                        Text("캡챠 해결 완료", maxLines = 1, softWrap = false)
                     }
                 }
 
                 Spacer(Modifier.height(8.dp))
-
-                Button(
-                    onClick = onOpenAutoCaptchaGuide,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("캡챠 자동 해결하기")
-                }
+                ProxyCleanerEntryButton(
+                    text = "🛡️ 대리 클리너 (캡차 자동 해결)",
+                    uiColors = uiColors,
+                    onClick = onOpenProxyCleaner
+                )
             }
         },
         containerColor = cardColor,

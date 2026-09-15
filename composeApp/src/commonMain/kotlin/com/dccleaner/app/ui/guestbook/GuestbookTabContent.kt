@@ -18,13 +18,16 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +46,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+data class GuestbookCacheFilterResult(
+    val userIdsToSend: List<String>,
+    val skippedCount: Int
+)
 
 @Composable
 fun GuestbookTabContent(
@@ -66,6 +74,10 @@ fun GuestbookTabContent(
     onSuccessCountChange: (Int) -> Unit,
     failCount: Int,
     onFailCountChange: (Int) -> Unit,
+    cacheEnabled: Boolean,
+    cachedUserCount: Int,
+    onFilterCachedUsers: suspend (List<String>) -> GuestbookCacheFilterResult,
+    onClearCachedUsers: suspend () -> Boolean,
     onResolveUserList: suspend (String) -> String,
     onStartGuestbookSend: (List<String>, String) -> Unit,
 ) {
@@ -74,6 +86,10 @@ fun GuestbookTabContent(
     var isLoadingRawList by remember { mutableStateOf(false) }
     var rawListError by remember { mutableStateOf<String?>(null) }
     var resolvedUserIds by remember { mutableStateOf<List<String>?>(null) }
+    var cachedSkippedCount by remember { mutableStateOf(0) }
+    var showClearCacheDialog by remember { mutableStateOf(false) }
+    var isClearingCache by remember { mutableStateOf(false) }
+    var isApplyingCache by remember { mutableStateOf(false) }
 
     val userIds = remember(userListText) {
         userListText.lines()
@@ -90,6 +106,7 @@ fun GuestbookTabContent(
         { value ->
             rawListError = null
             resolvedUserIds = null
+            cachedSkippedCount = 0
             latestOnUserListTextChange(value)
         }
     }
@@ -154,8 +171,9 @@ fun GuestbookTabContent(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 } else if (resolvedUserIds != null) {
+                    val sendCount = resolvedUserIds?.size ?: 0
                     Text(
-                        "${resolvedUserIds?.size ?: 0}명 불러옴",
+                        "총 ${sendCount + cachedSkippedCount}명 · 캐시 제외 ${cachedSkippedCount}명 · 전송 대상 ${sendCount}명",
                         style = MaterialTheme.typography.bodySmall,
                         color = primaryColor,
                         modifier = Modifier.padding(top = 4.dp)
@@ -194,9 +212,45 @@ fun GuestbookTabContent(
 
                 Spacer(Modifier.height(16.dp))
 
-                if (isSending || isLoadingRawList) {
+                if (cacheEnabled) {
                     Text(
-                        if (isLoadingRawList) "유저 리스트 불러오는 중..." else "$progressDone / $progressTotal 전송 완료",
+                        "전송 캐시",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = primaryColor
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "캐시된 유저 ${cachedUserCount}명",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        "현재 로그인 계정에서 전송 성공한 유저는 메시지가 달라도 다음 전송에서 자동 제외됩니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { showClearCacheDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = cachedUserCount > 0 && !isSending && !isLoadingRawList &&
+                            !isApplyingCache && !isClearingCache,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("캐시 초기화하기")
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+
+                if (isSending || isLoadingRawList || isApplyingCache) {
+                    Text(
+                        when {
+                            isLoadingRawList -> "유저 리스트 불러오는 중..."
+                            isApplyingCache -> "전송 캐시 확인 중..."
+                            else -> "$progressDone / $progressTotal 전송 완료"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = primaryColor,
@@ -206,7 +260,9 @@ fun GuestbookTabContent(
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = {
-                            if (isLoadingRawList) 0f else if (progressTotal > 0) progressDone.toFloat() / progressTotal.toFloat() else 0f
+                            if (isLoadingRawList || isApplyingCache) 0f
+                            else if (progressTotal > 0) progressDone.toFloat() / progressTotal.toFloat()
+                            else 0f
                         },
                         modifier = Modifier.fillMaxWidth(),
                         color = primaryColor
@@ -220,12 +276,37 @@ fun GuestbookTabContent(
                         .height(52.dp),
                     onClick = {
                         rawListError = null
-                        if (!isRawLinkInput) {
-                            onShowConfirmDialogChange(true)
+                        if (resolvedUserIds != null) {
+                            if (resolvedUserIds?.isEmpty() == true) {
+                                rawListError = "모든 대상이 전송 캐시에 있어 전송할 유저가 없습니다."
+                            } else {
+                                onShowConfirmDialogChange(true)
+                            }
                             return@Button
                         }
-                        if (resolvedUserIds != null) {
-                            onShowConfirmDialogChange(true)
+                        if (!isRawLinkInput) {
+                            coroutine.launch {
+                                isApplyingCache = true
+                                try {
+                                    val distinctUserIds = withContext(Dispatchers.Default) {
+                                        userIds.distinct()
+                                    }
+                                    val cacheResult = onFilterCachedUsers(distinctUserIds)
+                                    resolvedUserIds = cacheResult.userIdsToSend
+                                    cachedSkippedCount = cacheResult.skippedCount
+                                    if (cacheResult.userIdsToSend.isEmpty()) {
+                                        rawListError = "모든 대상이 전송 캐시에 있어 전송할 유저가 없습니다."
+                                        return@launch
+                                    }
+                                    onShowConfirmDialogChange(true)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    rawListError = e.message ?: "전송 캐시를 확인하지 못했습니다."
+                                } finally {
+                                    isApplyingCache = false
+                                }
+                            }
                             return@Button
                         }
                         coroutine.launch {
@@ -252,7 +333,13 @@ fun GuestbookTabContent(
                                     rawListError = "전송할 유저 ID가 없습니다."
                                     return@launch
                                 }
-                                resolvedUserIds = resolvedIds
+                                val cacheResult = onFilterCachedUsers(resolvedIds)
+                                resolvedUserIds = cacheResult.userIdsToSend
+                                cachedSkippedCount = cacheResult.skippedCount
+                                if (cacheResult.userIdsToSend.isEmpty()) {
+                                    rawListError = "모든 대상이 전송 캐시에 있어 전송할 유저가 없습니다."
+                                    return@launch
+                                }
                                 onShowConfirmDialogChange(true)
                             } catch (e: CancellationException) {
                                 throw e
@@ -263,7 +350,7 @@ fun GuestbookTabContent(
                             }
                         }
                     },
-                    enabled = !isSending && !isLoadingRawList &&
+                    enabled = !isSending && !isLoadingRawList && !isApplyingCache &&
                         (isRawLinkInput || userIds.isNotEmpty()) &&
                         messageText.isNotBlank(),
                     shape = RoundedCornerShape(12.dp),
@@ -307,6 +394,44 @@ fun GuestbookTabContent(
                 onStartGuestbookSend(ids, message)
             },
             onDismiss = { onShowConfirmDialogChange(false) }
+        )
+    }
+
+    if (cacheEnabled && showClearCacheDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCacheDialog = false },
+            title = { Text("전송 캐시 초기화") },
+            text = {
+                Text("현재 로그인 계정에 저장된 전송 완료 유저 캐시를 모두 삭제하시겠습니까?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearCacheDialog = false
+                        coroutine.launch {
+                            isClearingCache = true
+                            try {
+                                if (onClearCachedUsers()) {
+                                    resolvedUserIds = null
+                                    cachedSkippedCount = 0
+                                    rawListError = null
+                                } else {
+                                    rawListError = "전송 캐시를 초기화하지 못했습니다."
+                                }
+                            } finally {
+                                isClearingCache = false
+                            }
+                        }
+                    }
+                ) {
+                    Text("초기화")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCacheDialog = false }) {
+                    Text("취소")
+                }
+            }
         )
     }
 

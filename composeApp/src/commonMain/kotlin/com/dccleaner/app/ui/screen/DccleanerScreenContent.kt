@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.ButtonDefaults
@@ -37,7 +36,12 @@ import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -45,10 +49,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.model.DeleteTaskProgress
+import com.dccleaner.app.model.DeletionPreview
+import com.dccleaner.app.model.DaewangconProgress
+import com.dccleaner.app.model.RemoteBannerConfig
 import com.dccleaner.app.model.SavedAccount
 import com.dccleaner.app.model.UiColors
 import com.dccleaner.app.model.UserInfo
@@ -60,6 +69,7 @@ import com.dccleaner.app.ui.card.DeleteTaskRestoreOverlay
 import com.dccleaner.app.ui.card.GuestbookProgressCard
 import com.dccleaner.app.ui.card.InterruptedDeleteTasksCard
 import com.dccleaner.app.ui.card.LoginCard
+import com.dccleaner.app.ui.card.RemoteBannerCard
 import com.dccleaner.app.ui.card.TaskProgressDialog
 import com.dccleaner.app.ui.card.UserInfoCard
 import com.dccleaner.app.ui.card.VersionInfoCard
@@ -72,9 +82,16 @@ import com.dccleaner.app.ui.dialog.ErrorDialog
 import com.dccleaner.app.ui.dialog.StartDeletionDialog
 import com.dccleaner.app.ui.dialog.StopDaewangconDialog
 import com.dccleaner.app.ui.dialog.StopDeleteDialog
+import com.dccleaner.app.ui.dialog.ProxyCleanerQuoteDialog
 import com.dccleaner.app.ui.guestbook.GuestbookTabContent
+import com.dccleaner.app.ui.guestbook.GuestbookCacheFilterResult
+import com.dccleaner.app.platform.fetchRemoteBannerConfig
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private const val REMOTE_BANNER_REFRESH_INTERVAL_MILLIS = 5 * 60 * 1_000L
 
 data class DccleanerScreenState(
     val uiColors: UiColors,
@@ -82,10 +99,12 @@ data class DccleanerScreenState(
     val id: String,
     val pw: String,
     val loginInfo: UserInfo?,
+    val daewangconServerProgress: DaewangconProgress?,
     val saveLogin: Boolean,
     val credentialStorageSupported: Boolean = true,
     val savedAccounts: List<SavedAccount>,
     val isLoggingIn: Boolean,
+    val sessionExpired: Boolean,
     val deleteUiActive: Boolean,
     val runningLoginId: String,
     val displayedGallery: String,
@@ -99,6 +118,8 @@ data class DccleanerScreenState(
     val focusedTaskId: String?,
     val restoringMessage: String,
     val selectedTab: Int,
+    val developerMode: Boolean,
+    val commentCleanerRunning: Boolean,
     val postingGallList: Map<String, String>,
     val commentGallList: Map<String, String>,
     val deleteType: String,
@@ -108,8 +129,10 @@ data class DccleanerScreenState(
     val isCheckingTwocaptcha: Boolean,
     val minRecommendToKeep: String,
     val minCommentToKeep: String,
+    val minViewToKeep: String,
     val recommendFilterEnabled: Boolean,
     val commentFilterEnabled: Boolean,
+    val viewFilterEnabled: Boolean,
     val postContentFilterEnabled: Boolean,
     val postContentRegex: String,
     val myPostFilterEnabled: Boolean,
@@ -118,6 +141,7 @@ data class DccleanerScreenState(
     val commentContentRegex: String,
     val dateFilterEnabled: Boolean,
     val deleteNewestFirst: Boolean,
+    val deleteQuestionPosts: Boolean,
     val minPostAgeDaysToDelete: String,
     val recordGuestbookLog: Boolean,
     val latestVersion: String?,
@@ -126,6 +150,9 @@ data class DccleanerScreenState(
     val showErrorDialog: Boolean,
     val errorMessage: String,
     val deleteTaskToRemove: DeleteTaskProgress?,
+    val isInspectingDeletion: Boolean,
+    val deletionInspectionMessage: String,
+    val deletionPreview: DeletionPreview?,
     val showDeleteConfirmDialog: Boolean,
     val activeFilters: List<String>,
     val showDeleteProgressDialog: Boolean,
@@ -158,7 +185,9 @@ data class DccleanerScreenState(
     val guestbookProgressDone: Int,
     val guestbookProgressTotal: Int,
     val guestbookSuccessCount: Int,
-    val guestbookFailCount: Int
+    val guestbookFailCount: Int,
+    val guestbookCacheEnabled: Boolean,
+    val guestbookCachedUserCount: Int
 )
 
 class DccleanerScreenActions(
@@ -174,6 +203,10 @@ class DccleanerScreenActions(
     val onResumeTask: (DeleteTaskProgress) -> Unit,
     val onDeleteTask: (DeleteTaskProgress) -> Unit,
     val onTabChange: (Int) -> Unit,
+    val onDeveloperModeToggle: () -> Unit,
+    val onRequestWriteCookies: () -> List<String>,
+    val onStartCommentCleaner: (List<String>, Int, Int) -> Unit,
+    val onStopCommentCleaner: () -> Unit,
     val onOpenManual: (Int) -> Unit,
     val onDeleteTypeChange: (String) -> Unit,
     val onTwocaptchaKeyChange: (String) -> Unit,
@@ -183,8 +216,10 @@ class DccleanerScreenActions(
     val onSelectedGallListChange: (List<String>) -> Unit,
     val onMinRecommendToKeepChange: (String) -> Unit,
     val onMinCommentToKeepChange: (String) -> Unit,
+    val onMinViewToKeepChange: (String) -> Unit,
     val onRecommendFilterEnabledChange: (Boolean) -> Unit,
     val onCommentFilterEnabledChange: (Boolean) -> Unit,
+    val onViewFilterEnabledChange: (Boolean) -> Unit,
     val onPostContentFilterEnabledChange: (Boolean) -> Unit,
     val onPostContentRegexChange: (String) -> Unit,
     val onMyPostFilterEnabledChange: (Boolean) -> Unit,
@@ -193,6 +228,7 @@ class DccleanerScreenActions(
     val onCommentContentRegexChange: (String) -> Unit,
     val onDateFilterEnabledChange: (Boolean) -> Unit,
     val onDeleteNewestFirstChange: (Boolean) -> Unit,
+    val onDeleteQuestionPostsChange: (Boolean) -> Unit,
     val onMinPostAgeDaysToDeleteChange: (String) -> Unit,
     val onRecordGuestbookLogChange: (Boolean) -> Unit,
     val onCaptchaSectionPosition: (Int) -> Unit,
@@ -232,6 +268,8 @@ class DccleanerScreenActions(
     val onGuestbookProgressTotalChange: (Int) -> Unit,
     val onGuestbookSuccessCountChange: (Int) -> Unit,
     val onGuestbookFailCountChange: (Int) -> Unit,
+    val onFilterGuestbookCachedUsers: suspend (List<String>) -> GuestbookCacheFilterResult,
+    val onClearGuestbookCachedUsers: suspend () -> Boolean,
     val onResolveGuestbookUserList: suspend (String) -> String,
     val onStartGuestbookSend: (List<String>, String) -> Unit
 )
@@ -247,6 +285,18 @@ fun DccleanerScreenContent(
     maxContentWidth: Dp = Dp.Unspecified
 ) {
     val scrollState = rememberScrollState()
+    val uriHandler = LocalUriHandler.current
+    var remoteBanner by remember { mutableStateOf<RemoteBannerConfig?>(null) }
+    var dismissedBannerId by remember { mutableStateOf<String?>(null) }
+    var showProxyCleanerQuote by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            remoteBanner = fetchRemoteBannerConfig()
+            delay(REMOTE_BANNER_REFRESH_INTERVAL_MILLIS)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -291,11 +341,23 @@ fun DccleanerScreenContent(
                     credentialStorageSupported = state.credentialStorageSupported,
                     onSaveLoginChange = actions.onSaveLoginChange,
                     isLoggingIn = state.isLoggingIn,
+                    sessionExpired = state.sessionExpired,
                     onSavedAccountClick = actions.onSavedAccountClick,
                     onDeleteSavedAccountClick = actions.onDeleteSavedAccountClick,
                     onLoginClick = actions.onLoginClick
                 )
             } else {
+                remoteBanner
+                    ?.takeUnless { it.id == dismissedBannerId }
+                    ?.let { banner ->
+                        RemoteBannerCard(
+                            banner = banner,
+                            uiColors = state.uiColors,
+                            onAction = { url -> runCatching { uriHandler.openUri(url) } },
+                            onDismiss = { dismissedBannerId = banner.id }
+                        )
+                        Spacer(Modifier.height(20.dp))
+                    }
                 UserInfoCard(
                     uiColors = state.uiColors,
                     loginInfo = state.loginInfo,
@@ -316,7 +378,19 @@ fun DccleanerScreenContent(
                     TabsCard(state, actions)
                     Spacer(Modifier.height(20.dp))
                     when (state.selectedTab) {
-                        0 -> DcCleanerTabContent(
+                        0 -> Column {
+                            state.daewangconServerProgress
+                                ?.takeUnless(DaewangconProgress::isEnabled)
+                                ?.let { progress ->
+                                    DaewangconCard(
+                                        uiColors = state.uiColors,
+                                        progress = progress,
+                                        onStartDaewangcon = actions.onStartDaewangconRequest,
+                                        isDaewangconRunning = state.isDaewangconRunning
+                                    )
+                                    Spacer(Modifier.height(20.dp))
+                                }
+                            DcCleanerTabContent(
                             uiColors = state.uiColors,
                             postingGallList = state.postingGallList,
                             commentGallList = state.commentGallList,
@@ -337,10 +411,14 @@ fun DccleanerScreenContent(
                             onMinRecommendToKeepChange = actions.onMinRecommendToKeepChange,
                             minCommentToKeep = state.minCommentToKeep,
                             onMinCommentToKeepChange = actions.onMinCommentToKeepChange,
+                            minViewToKeep = state.minViewToKeep,
+                            onMinViewToKeepChange = actions.onMinViewToKeepChange,
                             recommendFilterEnabled = state.recommendFilterEnabled,
                             onRecommendFilterEnabledChange = actions.onRecommendFilterEnabledChange,
                             commentFilterEnabled = state.commentFilterEnabled,
                             onCommentFilterEnabledChange = actions.onCommentFilterEnabledChange,
+                            viewFilterEnabled = state.viewFilterEnabled,
+                            onViewFilterEnabledChange = actions.onViewFilterEnabledChange,
                             postContentFilterEnabled = state.postContentFilterEnabled,
                             onPostContentFilterEnabledChange = actions.onPostContentFilterEnabledChange,
                             postContentRegex = state.postContentRegex,
@@ -357,6 +435,8 @@ fun DccleanerScreenContent(
                             onDateFilterEnabledChange = actions.onDateFilterEnabledChange,
                             deleteNewestFirst = state.deleteNewestFirst,
                             onDeleteNewestFirstChange = actions.onDeleteNewestFirstChange,
+                            deleteQuestionPosts = state.deleteQuestionPosts,
+                            onDeleteQuestionPostsChange = actions.onDeleteQuestionPostsChange,
                             minPostAgeDaysToDelete = state.minPostAgeDaysToDelete,
                             onMinPostAgeDaysToDeleteChange = actions.onMinPostAgeDaysToDeleteChange,
                             recordGuestbookLog = state.recordGuestbookLog,
@@ -376,14 +456,12 @@ fun DccleanerScreenContent(
                                     (scrollState.value + coordinates.positionInRoot().y).roundToInt()
                                 )
                             },
-                            onValidateTwocaptchaKey = actions.onValidateTwocaptchaKey
-                        )
-                        1 -> DaewangconCard(
-                            uiColors = state.uiColors,
-                            onStartDaewangcon = actions.onStartDaewangconRequest,
-                            isDaewangconRunning = state.isDaewangconRunning
-                        )
-                        2 -> GuestbookTabContent(
+                            onValidateTwocaptchaKey = actions.onValidateTwocaptchaKey,
+                            onOpenAutoCaptchaGuide = actions.onOpenAutoCaptchaGuide,
+                                onOpenProxyCleaner = { showProxyCleanerQuote = true }
+                            )
+                        }
+                        1 -> GuestbookTabContent(
                             uiColors = state.uiColors,
                             coroutine = coroutineScope,
                             userListText = state.guestbookUserListText,
@@ -404,8 +482,22 @@ fun DccleanerScreenContent(
                             onSuccessCountChange = actions.onGuestbookSuccessCountChange,
                             failCount = state.guestbookFailCount,
                             onFailCountChange = actions.onGuestbookFailCountChange,
+                            cacheEnabled = state.guestbookCacheEnabled,
+                            cachedUserCount = state.guestbookCachedUserCount,
+                            onFilterCachedUsers = actions.onFilterGuestbookCachedUsers,
+                            onClearCachedUsers = actions.onClearGuestbookCachedUsers,
                             onResolveUserList = actions.onResolveGuestbookUserList,
                             onStartGuestbookSend = actions.onStartGuestbookSend
+                        )
+                        2 -> WriteTabContent(
+                            onRequestCookies = actions.onRequestWriteCookies,
+                            commentCleanerRunning = state.commentCleanerRunning,
+                            onStartCommentCleaner = actions.onStartCommentCleaner,
+                            onStopCommentCleaner = actions.onStopCommentCleaner,
+                            uiColors = state.uiColors,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(720.dp)
                         )
                     }
                 }
@@ -421,7 +513,16 @@ fun DccleanerScreenContent(
                     currentVersion = state.currentVersion,
                     latestVersion = state.latestVersion,
                     isCheckingVersion = state.isCheckingVersion,
-                    onUpdateClick = actions.onOpenUpdate
+                    onUpdateClick = actions.onOpenUpdate,
+                    onDeveloperModeToggle = {
+                        actions.onDeveloperModeToggle()
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (state.developerMode) "개발자 모드가 해제되었습니다."
+                                else "개발자 모드가 활성화되었습니다."
+                            )
+                        }
+                    }
                 )
             }
             Spacer(Modifier.height(100.dp))
@@ -440,7 +541,12 @@ fun DccleanerScreenContent(
         if (state.restoringTaskId != null) {
             DeleteTaskRestoreOverlay(state.uiColors, state.restoringMessage)
         }
-        ScreenDialogs(state, actions)
+        ScreenDialogs(
+            state = state,
+            actions = actions,
+            showProxyCleanerQuote = showProxyCleanerQuote,
+            onShowProxyCleanerQuoteChange = { showProxyCleanerQuote = it }
+        )
     }
 }
 
@@ -453,34 +559,41 @@ private fun HeaderCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(8.dp, RoundedCornerShape(16.dp)),
+            .shadow(4.dp, RoundedCornerShape(16.dp)),
         colors = CardDefaults.cardColors(containerColor = uiColors.card),
-        border = BorderStroke(1.dp, uiColors.outline),
         shape = RoundedCornerShape(16.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Brush.horizontalGradient(listOf(uiColors.headerStart, uiColors.headerEnd)))
-                .padding(20.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(uiColors.headerStart, uiColors.headerEnd)
+                    )
+                )
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Build, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "디시클리너 모바일",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                Text(
+                    "디시클리너 모바일 & PC",
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 IconButton(
-                    onClick = { onDarkThemeChange(!isDarkTheme) }
+                    onClick = { onDarkThemeChange(!isDarkTheme) },
+                    modifier = Modifier.background(
+                        color = Color.White.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 ) {
                     Icon(
                         imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
@@ -509,11 +622,11 @@ private fun TabsCard(state: DccleanerScreenState, actions: DccleanerScreenAction
             contentColor = state.uiColors.primary,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Tab(selected = state.selectedTab == 0, onClick = { actions.onTabChange(0) }, text = { Text("디시 클리너") })
-            Tab(selected = state.selectedTab == 1, onClick = { actions.onTabChange(1) }, text = { Text("대왕콘 얻기") })
-            Tab(selected = state.selectedTab == 2, onClick = { actions.onTabChange(2) }, text = { Text("방명록 쓰기") })
+            Tab(selected = state.selectedTab == 0, onClick = { actions.onTabChange(0) }, text = { Text("클리너") })
+            Tab(selected = state.selectedTab == 1, onClick = { actions.onTabChange(1) }, text = { Text("방명록") })
+            Tab(selected = state.selectedTab == 2, onClick = { actions.onTabChange(2) }, text = { Text("글 쓰기") })
         }
-        if (state.selectedTab == 0 || state.selectedTab == 2) {
+        if (state.selectedTab == 0 || state.selectedTab == 1) {
             TextButton(
                 onClick = { actions.onOpenManual(state.selectedTab) },
                 modifier = Modifier
@@ -534,9 +647,19 @@ private fun TabsCard(state: DccleanerScreenState, actions: DccleanerScreenAction
 }
 
 @Composable
-private fun ScreenDialogs(state: DccleanerScreenState, actions: DccleanerScreenActions) {
+private fun ScreenDialogs(
+    state: DccleanerScreenState,
+    actions: DccleanerScreenActions,
+    showProxyCleanerQuote: Boolean,
+    onShowProxyCleanerQuoteChange: (Boolean) -> Unit
+) {
     if (state.showErrorDialog) {
-        ErrorDialog(state.uiColors, state.errorMessage, actions.onDismissError)
+        ErrorDialog(
+            uiColors = state.uiColors,
+            title = errorDialogTitle(state.errorMessage),
+            errorMessage = state.errorMessage,
+            onDismiss = actions.onDismissError
+        )
     }
     if (state.deleteTaskToRemove != null) {
         DeleteTaskRecordDialog(
@@ -546,10 +669,16 @@ private fun ScreenDialogs(state: DccleanerScreenState, actions: DccleanerScreenA
         )
     }
     if (state.showDeleteConfirmDialog) {
+        val galleryMap = if (state.deleteType == "posting") state.postingGallList else state.commentGallList
         StartDeletionDialog(
             uiColors = state.uiColors,
             deleteType = state.deleteType,
             selectedGalleryCount = state.selectedGallList.size,
+            selectedGalleryNames = state.selectedGallList.mapNotNull(galleryMap::get),
+            preview = state.deletionPreview,
+            previewLoading = state.isInspectingDeletion,
+            previewMessage = state.deletionInspectionMessage,
+            questionPostsMayBeExcluded = state.deleteType == "posting" && !state.deleteQuestionPosts,
             activeFilters = state.activeFilters,
             onConfirm = actions.onConfirmStartDeletion,
             onDismiss = actions.onDismissStartDeletion
@@ -572,7 +701,8 @@ private fun ScreenDialogs(state: DccleanerScreenState, actions: DccleanerScreenA
                 deleteLog = state.displayedDeleteLog,
                 onClose = actions.onCloseDeleteProgress,
                 onComplete = actions.onCompleteDeleteProgress,
-                onStop = actions.onStopDeleteRequest
+                onStop = actions.onStopDeleteRequest,
+                onOpenProxyCleaner = { onShowProxyCleanerQuoteChange(true) }
             )
         }
     }
@@ -588,7 +718,17 @@ private fun ScreenDialogs(state: DccleanerScreenState, actions: DccleanerScreenA
             uiColors = state.uiColors,
             onOpenGallog = actions.onOpenGallogForCaptcha,
             onResolveCaptcha = actions.onResolveCaptcha,
-            onOpenAutoCaptchaGuide = actions.onOpenAutoCaptchaGuide
+            onOpenProxyCleaner = { onShowProxyCleanerQuoteChange(true) }
+        )
+    }
+    if (showProxyCleanerQuote) {
+        ProxyCleanerQuoteDialog(
+            uiColors = state.uiColors,
+            initialPostCount = state.loginInfo?.article_num?.toCount() ?: 0,
+            initialCommentCount = state.loginInfo?.comment_num?.toCount() ?: 0,
+            gallList = if (state.deleteType == "posting") state.postingGallList else state.commentGallList,
+            selectedGalleries = state.selectedGallList,
+            onDismiss = { onShowProxyCleanerQuoteChange(false) }
         )
     }
     if (state.showDeleteAccountDialog && state.accountToDelete != null) {
@@ -643,3 +783,11 @@ private fun ScreenDialogs(state: DccleanerScreenState, actions: DccleanerScreenA
         )
     }
 }
+
+private fun String.toCount(): Int = filter(Char::isDigit).toIntOrNull() ?: 0
+
+private fun errorDialogTitle(errorMessage: String): String =
+    when {
+        errorMessage.startsWith("로그인에 실패") -> "로그인 실패"
+        else -> "오류"
+    }

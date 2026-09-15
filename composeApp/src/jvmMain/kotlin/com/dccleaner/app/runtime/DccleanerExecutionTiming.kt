@@ -8,9 +8,9 @@ data class DccleanerExecutionTiming(
     val captchaRetryDelayMillis: Long = 3_000L,
     val captchaSettleDelayMillis: Long = 2_000L,
     val captchaPollDelayMillis: Long = 1_000L,
-    val daewangconPostIntervalDelayMillis: Long = 5_000L,
+    val daewangconPostIntervalDelayMillis: Long = 30_000L,
     val daewangconCommentIntervalDelayMillis: Long = 0L,
-    val daewangconPostBatchDelayMillis: Long = 105_000L,
+    val daewangconPostBatchDelayMillis: Long = 0L,
     val daewangconCommentBatchDelayMillis: Long = 90_000L
 ) {
     companion object {

@@ -32,10 +32,14 @@ fun DcCleanerTabContent(
     onMinRecommendToKeepChange: (String) -> Unit,
     minCommentToKeep: String,
     onMinCommentToKeepChange: (String) -> Unit,
+    minViewToKeep: String,
+    onMinViewToKeepChange: (String) -> Unit,
     recommendFilterEnabled: Boolean,
     onRecommendFilterEnabledChange: (Boolean) -> Unit,
     commentFilterEnabled: Boolean,
     onCommentFilterEnabledChange: (Boolean) -> Unit,
+    viewFilterEnabled: Boolean,
+    onViewFilterEnabledChange: (Boolean) -> Unit,
     postContentFilterEnabled: Boolean,
     onPostContentFilterEnabledChange: (Boolean) -> Unit,
     postContentRegex: String,
@@ -52,6 +56,8 @@ fun DcCleanerTabContent(
     onDateFilterEnabledChange: (Boolean) -> Unit,
     deleteNewestFirst: Boolean,
     onDeleteNewestFirstChange: (Boolean) -> Unit,
+    deleteQuestionPosts: Boolean,
+    onDeleteQuestionPostsChange: (Boolean) -> Unit,
     minPostAgeDaysToDelete: String,
     onMinPostAgeDaysToDeleteChange: (String) -> Unit,
     recordGuestbookLog: Boolean,
@@ -59,7 +65,9 @@ fun DcCleanerTabContent(
     captchaSectionMarker: Modifier = Modifier,
     deleteOptionsSectionMarker: Modifier = Modifier,
     filterOptionsSectionMarker: Modifier = Modifier,
-    onValidateTwocaptchaKey: suspend (String) -> Boolean
+    onValidateTwocaptchaKey: suspend (String) -> Boolean,
+    onOpenAutoCaptchaGuide: () -> Unit,
+    onOpenProxyCleaner: () -> Unit
 ) {
     Column {
         Spacer(Modifier.height(1.dp).then(captchaSectionMarker))
@@ -75,7 +83,8 @@ fun DcCleanerTabContent(
             onIsCheckingTwocaptchaChange = onIsCheckingTwocaptchaChange,
             coroutine = coroutine,
             snackbarHostState = snackbarHostState,
-            onValidateTwocaptchaKey = onValidateTwocaptchaKey
+            onValidateTwocaptchaKey = onValidateTwocaptchaKey,
+            onOpenAutoCaptchaGuide = onOpenAutoCaptchaGuide
         )
 
         Spacer(Modifier.height(20.dp))
@@ -106,10 +115,14 @@ fun DcCleanerTabContent(
                 onMinRecommendToKeepChange = onMinRecommendToKeepChange,
                 minCommentToKeep = minCommentToKeep,
                 onMinCommentToKeepChange = onMinCommentToKeepChange,
+                minViewToKeep = minViewToKeep,
+                onMinViewToKeepChange = onMinViewToKeepChange,
                 recommendFilterEnabled = recommendFilterEnabled,
                 onRecommendFilterEnabledChange = onRecommendFilterEnabledChange,
                 commentFilterEnabled = commentFilterEnabled,
                 onCommentFilterEnabledChange = onCommentFilterEnabledChange,
+                viewFilterEnabled = viewFilterEnabled,
+                onViewFilterEnabledChange = onViewFilterEnabledChange,
                 postContentFilterEnabled = postContentFilterEnabled,
                 onPostContentFilterEnabledChange = onPostContentFilterEnabledChange,
                 postContentRegex = postContentRegex,
@@ -118,11 +131,14 @@ fun DcCleanerTabContent(
                 onDateFilterEnabledChange = onDateFilterEnabledChange,
                 deleteNewestFirst = deleteNewestFirst,
                 onDeleteNewestFirstChange = onDeleteNewestFirstChange,
+                deleteQuestionPosts = deleteQuestionPosts,
+                onDeleteQuestionPostsChange = onDeleteQuestionPostsChange,
                 minPostAgeDaysToDelete = minPostAgeDaysToDelete,
                 onMinPostAgeDaysToDeleteChange = onMinPostAgeDaysToDeleteChange,
                 recordGuestbookLog = recordGuestbookLog,
                 onRecordGuestbookLogChange = onRecordGuestbookLogChange,
-                onShowDeleteDialog = onShowDeleteDialog
+                onShowDeleteDialog = onShowDeleteDialog,
+                onOpenProxyCleaner = onOpenProxyCleaner
             )
 
             Spacer(Modifier.height(20.dp))
@@ -150,7 +166,8 @@ fun DcCleanerTabContent(
                 onMinPostAgeDaysToDeleteChange = onMinPostAgeDaysToDeleteChange,
                 recordGuestbookLog = recordGuestbookLog,
                 onRecordGuestbookLogChange = onRecordGuestbookLogChange,
-                onShowDeleteDialog = onShowDeleteDialog
+                onShowDeleteDialog = onShowDeleteDialog,
+                onOpenProxyCleaner = onOpenProxyCleaner
             )
 
             Spacer(Modifier.height(20.dp))

@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -69,6 +68,7 @@ fun LoginCard(
     credentialStorageSupported: Boolean = true,
     onSaveLoginChange: (Boolean) -> Unit,
     isLoggingIn: Boolean,
+    sessionExpired: Boolean,
     onSavedAccountClick: (SavedAccount) -> Unit,
     onDeleteSavedAccountClick: (SavedAccount) -> Unit,
     onLoginClick: () -> Unit
@@ -110,6 +110,15 @@ fun LoginCard(
             }
 
             Spacer(Modifier.height(20.dp))
+
+            if (sessionExpired) {
+                Text(
+                    "로그인 세션이 만료되었습니다. 다시 로그인해주세요.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = uiColors.danger
+                )
+                Spacer(Modifier.height(16.dp))
+            }
 
             // 저장된 계정 목록
             if (savedAccounts.isNotEmpty()) {
@@ -162,7 +171,7 @@ fun LoginCard(
                                 Icon(
                                     Icons.Default.Delete,
                                     contentDescription = "계정 삭제",
-                                    tint = Color.Red,
+                                    tint = uiColors.danger,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -286,18 +295,18 @@ fun LoginCard(
                 if (isLoggingIn) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 2.dp
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "로그인 중...",
+                        if (sessionExpired) "재로그인 중..." else "로그인 중...",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                 } else {
                     Text(
-                        "로그인",
+                        if (sessionExpired) "재로그인" else "로그인",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )

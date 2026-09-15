@@ -12,6 +12,7 @@ object GuestbookExecutionRunner {
         userIds: List<String>,
         message: String,
         send: suspend (userId: String, message: String) -> Boolean,
+        onResult: suspend (userId: String, success: Boolean) -> Unit = { _, _ -> },
         onProgress: (GuestbookExecutionProgress) -> Unit = {}
     ): GuestbookExecutionProgress {
         var progress = GuestbookExecutionProgress(
@@ -24,6 +25,7 @@ object GuestbookExecutionRunner {
 
         userIds.forEach { userId ->
             val success = send(userId, message)
+            onResult(userId, success)
             progress = progress.copy(
                 done = progress.done + 1,
                 successCount = progress.successCount + if (success) 1 else 0,

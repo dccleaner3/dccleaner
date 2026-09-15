@@ -115,6 +115,7 @@ gen-external-apklibs
 
 # Android Studio
 /*/build/
+/*/release/
 /*/local.properties
 /*/out
 /*/*/build
@@ -194,10 +195,6 @@ com_crashlytics_export_strings.xml
 crashlytics.properties
 crashlytics-build.properties
 fabric.properties
-
-### AndroidStudio Patch ###
-
-!/gradle/wrapper/gradle-wrapper.jar
 
 ### Intellij ###
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio and WebStorm
@@ -282,6 +279,7 @@ cmake-build-*/
 
 # Package Files #
 *.jar
+!/gradle/wrapper/gradle-wrapper.jar
 *.nar
 *.zip
 *.tar.gz
@@ -351,3 +349,5 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.gitignore.io/api/java,linux,macos,windows,android,intellij,androidstudio
+
+.gitattributes

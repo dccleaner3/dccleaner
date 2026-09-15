@@ -7,48 +7,69 @@ import kotlin.test.assertTrue
 
 class DeleteLogEntryTest {
     @Test
-    fun progressMessageOmitsExcludedCountWhenNothingIsSkipped() {
-        assertEquals(
-            "🗑️ 3/10 (30%)",
-            deleteGalleryProgressMessage(
-                deleted = 3,
-                skipped = 0,
-                total = 10
-            )
+    fun guestbookRunCompletionRecognizesSuccessAndFinalFailure() {
+        assertTrue("[12:34:56] ✅ 방명록 가동 기록 작성 완료".isGuestbookRunLogCompletion())
+        assertTrue("[12:34:56] ⚠️ 방명록 가동 기록 작성 실패".isGuestbookRunLogCompletion())
+    }
+
+    @Test
+    fun guestbookRunCompletionIgnoresFailureDetailLog() {
+        assertFalse(
+            "[12:34:56] ⚠️ 방명록 가동 기록 작성 실패: 네트워크 오류"
+                .isGuestbookRunLogCompletion()
         )
     }
 
     @Test
-    fun progressMessageShowsExcludedCountOnlyWhenPresent() {
-        assertEquals(
-            "🗑️ 7/10 (70% · 5개 제외)",
-            deleteGalleryProgressMessage(
-                deleted = 2,
-                skipped = 5,
-                total = 10
-            )
+    fun transientProgressStatusesReplaceTheSingleActiveLine() {
+        val initial = listOf(
+            "[12:00:00] 🚀 테스트 갤러리 글 삭제 시작",
+            "[12:00:01] $DELETE_PROGRESS_LOG_MARKER🗑️ 3/10 (30%)"
         )
+
+        val solving = initial.replaceDeleteProgressLog(
+            "[12:00:02] $DELETE_PROGRESS_LOG_MARKER⚠️ 캡챠 감지됨 - 자동 해결 시도 (1/3)"
+        )
+        val retrying = solving.replaceDeleteProgressLog(
+            "[12:00:03] $DELETE_PROGRESS_LOG_MARKER⚠️ 2captcha 실패 - 재시도 중... (1/3)"
+        )
+        val resumed = retrying.replaceDeleteProgressLog(
+            "[12:00:04] $DELETE_PROGRESS_LOG_MARKER🗑️ 4/10 (40%)"
+        )
+
+        assertEquals(2, resumed.size)
+        assertEquals(1, resumed.count(String::isDeleteProgressLog))
+        assertTrue(resumed.none { "자동 해결 시도" in it || "재시도 중" in it })
     }
 
     @Test
-    fun galleryBoundaryLogsAreRecognizedWithoutMatchingOtherLogs() {
-        val start = "[12:00:00] 🚀 국내야구갤러리 글 삭제 시작"
-        val completion = "[12:01:00] ✅ 국내야구갤러리 글 삭제 완료 (총 3개)"
-        val overallCompletion = "[12:02:00] 🎉 모든 작업 완료! 총 3개 글/댓글 삭제"
+    fun manualCaptchaStatusesAreReplacedAfterResume() {
+        val waiting = listOf(
+            "[12:00:00] $DELETE_PROGRESS_LOG_MARKER⚠️ 캡챠 감지됨 - 수동 해결 필요"
+        )
+        val resolving = waiting.replaceDeleteProgressLog(
+            "[12:00:01] $DELETE_PROGRESS_LOG_MARKER✅ 캡챠 해결 완료 - 삭제 재개"
+        )
+        val resumed = resolving.replaceDeleteProgressLog(
+            "[12:00:02] $DELETE_PROGRESS_LOG_MARKER🗑️ 5/10 (50%)"
+        )
 
-        assertTrue(start.isDeleteGalleryStartLog())
-        assertTrue(completion.isDeleteGalleryCompletionLog())
-        assertFalse(overallCompletion.isDeleteGalleryCompletionLog())
+        assertEquals(1, resumed.size)
+        assertTrue("수동 해결 필요" !in resumed.single())
+        assertTrue("해결 완료" !in resumed.single())
     }
 
     @Test
-    fun guestbookRunLogBoundariesAreRecognized() {
-        val start = "[12:00:00] 📝 방명록 가동 기록 작성 중"
-        val completion = "[12:01:00] ✅ 방명록 가동 기록 작성 완료"
-        val unrelated = "[12:02:00] ✅ 방명록 등록 확인 완료"
+    fun completedStatusReplacesAndFinalizesAnActiveStatus() {
+        val running = listOf(
+            "[12:00:00] $DELETE_PROGRESS_LOG_MARKER📝 방명록 가동 기록 작성 중"
+        )
+        val completed = running.replaceDeleteProgressLog(
+            "[12:00:01] ✅ 방명록 가동 기록 작성 완료"
+        )
 
-        assertTrue(start.isGuestbookRunLogStart())
-        assertTrue(completion.isGuestbookRunLogCompletion())
-        assertFalse(unrelated.isGuestbookRunLogCompletion())
+        assertEquals(1, completed.size)
+        assertFalse(completed.single().isDeleteProgressLog())
+        assertTrue("작성 중" !in completed.single())
     }
 }

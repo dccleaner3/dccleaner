@@ -25,6 +25,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 interface CleanerDebugLogger {
     fun d(tag: String, message: String)
@@ -48,6 +49,63 @@ internal fun gallogListItemText(linkElement: Element?, postType: String): String
     } else {
         linkElement?.selectFirst("p.txt")?.text().orEmpty()
     }
+
+internal fun gallogTotalCount(doc: org.jsoup.nodes.Document): Int? =
+    doc.selectFirst("div.option_sort.gallog > span.num")
+        ?.text()
+        ?.filter(Char::isDigit)
+        ?.takeIf(String::isNotEmpty)
+        ?.toIntOrNull()
+
+internal fun loginBoxShowsLoggedIn(html: String): Boolean =
+    Jsoup.parse(html).select("#login_box .logout").isNotEmpty()
+
+data class MonitoredWrittenPost(
+    val gallogNo: Long,
+    val galleryId: String,
+    val postNo: String,
+    val galleryType: String,
+    val postUrl: String
+) {
+    val key: String get() = "$galleryId:$postNo"
+}
+
+data class MonitoredPostComment(val id: String, val content: String)
+
+internal data class MonitoredCommentPage(
+    val comments: List<MonitoredPostComment>,
+    val totalCount: Int
+)
+
+fun commentContainsBlockedKeyword(content: String, keywords: List<String>): Boolean =
+    keywords.any { it.isNotBlank() && content.contains(it, ignoreCase = true) }
+
+private fun JsonObject.stringValue(key: String): String =
+    this[key]?.jsonPrimitive?.content.orEmpty()
+
+internal fun parseMonitoredCommentPage(text: String): MonitoredCommentPage? = runCatching {
+    val root = Json.parseToJsonElement(text).jsonObject
+    val comments = (root["comments"] as? JsonArray).orEmpty().mapNotNull { element ->
+        val comment = element as? JsonObject ?: return@mapNotNull null
+        if (comment.stringValue("del_yn") == "Y" ||
+            comment.stringValue("nicktype") == "COMMENT_BOY"
+        ) return@mapNotNull null
+        val id = comment.stringValue("no")
+        if (id.isBlank()) return@mapNotNull null
+        MonitoredPostComment(
+            id,
+            Jsoup.parseBodyFragment(
+                comment.stringValue("memo").replace(Regex("(?i)<br\\s*/?>"), "\n")
+            ).text()
+        )
+    }
+    MonitoredCommentPage(
+        comments,
+        root.stringValue("total_cnt").toIntOrNull()
+            ?: root.stringValue("comment_cnt").toIntOrNull()
+            ?: comments.size
+    )
+}.getOrNull()
 
 class Cleaner private constructor(
     private val logSink: CleanerLogSink? = null,
@@ -259,6 +317,19 @@ class Cleaner private constructor(
 
     override fun getUserId(): String = userId
 
+    /** Returns the authenticated DCInside session in Set-Cookie format for an in-app WebView. */
+    fun getWebViewSessionCookies(): List<String> =
+        cookieManager.cookieStore.cookies
+            .firstOrNull { it.name.equals("PHPSESSID", ignoreCase = true) }
+            ?.value
+            ?.takeIf(String::isNotBlank)
+            ?.let { sessionId ->
+                listOf(
+                    "PHPSESSID=$sessionId; Domain=.dcinside.com; Path=/; Secure; HttpOnly"
+                )
+            }
+            .orEmpty()
+
     override fun getPostAgeDays(postNo: String): Long? {
         val postDate = getPostDate(postNo) ?: return null
         return ChronoUnit.DAYS.between(postDate, LocalDate.now(DC_ZONE_ID))
@@ -281,6 +352,7 @@ class Cleaner private constructor(
                 }
 
                 is DeleteResult.Error -> handleDeleteError(deleteResult, postNo, postType)
+                is DeleteResult.Excluded -> DeletePostResult(false, deleteResult.message, null)
                 is DeleteResult.Failed -> DeletePostResult(false, FAILED_MESSAGE, null)
                 is DeleteResult.Blocked -> DeletePostResult(false, BLOCKED_MESSAGE, null)
             }
@@ -402,6 +474,22 @@ class Cleaner private constructor(
         resetCaptchaState()
     }
 
+    suspend fun checkLoginSession(): Boolean? = loginMutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (userId.isBlank()) return@withContext false
+            try {
+                execute(buildRequest(loginBoxUrl, createLoginBoxHeaders())).use { response ->
+                    if (response.isSuccessful) loginBoxShowsLoggedIn(response.body.string()) else null
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logSink?.addLog("Cleaner", "로그인 세션 확인 실패: ${e.message}")
+                null
+            }
+        }
+    }
+
     suspend fun login(userId: String, userPw: String): Boolean =
         loginMutex.withLock {
             withContext(Dispatchers.IO) {
@@ -434,15 +522,13 @@ class Cleaner private constructor(
                         createLoginBoxHeaders(),
                         formBody
                     )
-                    execute(loginRequest).close()
+                    execute(loginRequest).close() // 응답만 소비
 
 
                     val checkRequest = buildRequest(loginBoxUrl, createLoginBoxHeaders())
                     val checkResponse = execute(checkRequest)
                     val checkHtml = checkResponse.body.string()
-                    val checkDoc = Jsoup.parse(checkHtml)
-
-                    val loginSuccess = checkDoc.select("#login_box .logout").isNotEmpty()
+                    val loginSuccess = loginBoxShowsLoggedIn(checkHtml)
                     if (loginSuccess) {
                         this@Cleaner.userId = normalizedUserId
                     } else {
@@ -505,7 +591,8 @@ class Cleaner private constructor(
     override suspend fun deletePost(
         postNo: String,
         postType: String,
-        solveCaptcha: Boolean
+        solveCaptcha: Boolean,
+        deleteQuestionPosts: Boolean
     ): DeleteResult = withContext(Dispatchers.IO) {
         logSink?.addLog("Cleaner", "글 삭제 시작 - postNo: $postNo, type: $postType, captcha: $solveCaptcha")
         try {
@@ -539,7 +626,7 @@ class Cleaner private constructor(
 
             debugLogger.d("Cleaner", "Delete form data prepared for post $postNo: ${formData.keys}")
 
-            val formBody = FormBody.Builder().apply {
+            var formBody = FormBody.Builder().apply {
                 formData.forEach { (k, v) -> add(k, v) }
             }.build()
 
@@ -582,6 +669,19 @@ class Cleaner private constructor(
                             val msg = data["msg"]?.jsonPrimitive?.content
                             val isAlreadyDeleted = result == "fail" && msg == "글 번호가 올바르지 않습니다."
 
+                            if (result == "confirm") {
+                                if (deleteQuestionPosts && "del_limit_ok" !in formData) {
+                                    formData["del_limit_ok"] = "1"
+                                    formBody = FormBody.Builder().apply {
+                                        formData.forEach { (key, value) -> add(key, value) }
+                                    }.build()
+                                    logSink?.addLog("Cleaner", "질문글 삭제 확인 후 재시도 - postNo: $postNo")
+                                    continue
+                                }
+                                logSink?.addLog("Cleaner", "삭제 확인이 필요한 항목 제외 - postNo: $postNo, msg: $msg")
+                                return@withContext DeleteResult.Excluded(msg.orEmpty())
+                            }
+
                             if (!msg.isNullOrBlank() && isCaptchaError(msg)) {
                                 debugLogger.w("Cleaner", "Captcha required in response msg - skip retry")
                                 logSink?.addLog("Cleaner", "캡챠 필요 감지 - postNo: $postNo")
@@ -592,7 +692,7 @@ class Cleaner private constructor(
                                 debugLogger.d("Cleaner", "Delete result: SUCCESS (or already deleted)")
                                 logSink?.addLog("Cleaner", "삭제 성공 - postNo: $postNo ${if (isAlreadyDeleted) "(이미 삭제됨)" else ""}")
                                 requestSuccessful = true
-                                break
+                                break // 성공했으므로 루프 종료
                             } else {
                                 logSink?.addLog("Cleaner", "삭제 실패 응답 - result: $result, msg: $msg")
                             }
@@ -697,7 +797,8 @@ class Cleaner private constructor(
     override suspend fun getPostList(
         gno: String,
         postType: String,
-        page: Int
+        page: Int,
+        cachePostData: Boolean
     ): PostListResult = withContext(Dispatchers.IO) {
         val gallogUrl =
             "$GALLOG_URL/$userId/$postType/index?" +
@@ -721,42 +822,181 @@ class Cleaner private constructor(
             }
 
             val requestedGalleryMatched = gallogResponseMatchesRequestedGallery(html, gno)
+            val totalCount = gallogTotalCount(doc)
             val postListElements = doc.select(".cont_listbox > li")
             if (postListElements.isEmpty()) {
                 return@withContext PostListResult.Success(
                     emptyList(),
-                    requestedGalleryMatched = requestedGalleryMatched
+                    requestedGalleryMatched = requestedGalleryMatched,
+                    totalCount = totalCount
                 )
             }
 
-            val posts = postListElements.reversed().mapNotNull { element ->
+            val collectedPosts = postListElements.reversed().mapNotNull { element ->
                 val postNoAttr = element.attr("data-no")
                 val linkElement = element.selectFirst(".gall_linkbox .link")
                 val postUrl = linkElement?.attr("href")
 
                 if (postNoAttr.isNotEmpty()) {
-                    if (postUrl != null && postUrl.isNotEmpty()) {
-                        postUrlMap[postNoAttr] = postUrl
+                    val isDccon = linkElement?.selectFirst(".comment_dccon") != null
+                    val text = gallogListItemText(linkElement, postType)
+                    val postDate = parseGallogDate(linkElement?.selectFirst(".date")?.text())
+                    if (cachePostData) {
+                        postUrl?.takeIf(String::isNotEmpty)?.let { postUrlMap[postNoAttr] = it }
+                        postDcconMap[postNoAttr] = isDccon
+                        postTextMap[postNoAttr] = text
+                        postDate?.let { postDateMap[postNoAttr] = it }
                     }
-                    postDcconMap[postNoAttr] = linkElement?.selectFirst(".comment_dccon") != null
-                    postTextMap[postNoAttr] = gallogListItemText(linkElement, postType)
-                    parseGallogDate(linkElement?.selectFirst(".date")?.text())?.let { date ->
-                        postDateMap[postNoAttr] = date
-                    }
-                    postNoAttr
+                    CollectedPost(
+                        postNo = postNoAttr,
+                        postUrl = postUrl,
+                        isDccon = isDccon,
+                        text = text,
+                        date = postDate?.toString()
+                    )
                 } else {
                     null
                 }
             }
 
             return@withContext PostListResult.Success(
-                posts,
-                requestedGalleryMatched = requestedGalleryMatched
+                posts = collectedPosts.map(CollectedPost::postNo),
+                requestedGalleryMatched = requestedGalleryMatched,
+                totalCount = totalCount,
+                collectedPosts = collectedPosts
             )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             return@withContext PostListResult.Failed
+        }
+    }
+
+    suspend fun getRecentWrittenPosts(page: Int = 1): List<MonitoredWrittenPost>? =
+        withContext(Dispatchers.IO) {
+            try {
+                val request = buildRequest("$GALLOG_URL/$userId/posting/index?p=$page")
+                execute(request).use { response ->
+                    if (!response.isSuccessful) return@withContext null
+                    Jsoup.parse(response.body.string()).select(".cont_listbox > li").mapNotNull { item ->
+                        val gallogNo = item.attr("data-no").toLongOrNull() ?: return@mapNotNull null
+                        val href = item.selectFirst(".gall_linkbox .link")?.attr("href")
+                            ?.replace("&amp;", "&")
+                            ?.let { if (it.startsWith("http")) it else "$GALL_BASE_URL${if (it.startsWith('/')) it else "/$it"}" }
+                            ?: return@mapNotNull null
+                        val url = href.toHttpUrlOrNull() ?: return@mapNotNull null
+                        val galleryId = url.queryParameter("id") ?: return@mapNotNull null
+                        val postNo = url.queryParameter("no") ?: return@mapNotNull null
+                        MonitoredWrittenPost(
+                            gallogNo = gallogNo,
+                            galleryId = galleryId,
+                            postNo = postNo,
+                            galleryType = when {
+                                "/mini/board/" in href -> "MI"
+                                "/mgallery/board/" in href -> "M"
+                                else -> "G"
+                            },
+                            postUrl = href
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                debugLogger.w("Cleaner", "댓글 자동 정리 글 목록 조회 실패", e)
+                null
+            }
+        }
+
+    suspend fun getMonitoredPostComments(post: MonitoredWrittenPost): List<MonitoredPostComment>? =
+        withContext(Dispatchers.IO) {
+            try {
+                val headers = mapOf(
+                    "Accept" to "application/json, text/javascript, */*; q=0.01",
+                    "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Origin" to GALL_BASE_URL,
+                    "Referer" to post.postUrl,
+                    "X-Requested-With" to "XMLHttpRequest"
+                )
+                val result = linkedMapOf<String, MonitoredPostComment>()
+                var page = 1
+                var pageCount = 1
+                while (page <= pageCount) {
+                    currentCoroutineContext().ensureActive()
+                    val body = FormBody.Builder()
+                        .add("id", post.galleryId)
+                        .add("no", post.postNo)
+                        .add("cmt_id", post.galleryId)
+                        .add("cmt_no", post.postNo)
+                        .add("focus_cno", "")
+                        .add("focus_pno", "")
+                        .add("e_s_n_o", "zzz")
+                        .add("comment_page", page.toString())
+                        .add("sort", "D")
+                        .add("prevCnt", "")
+                        .add("board_type", "")
+                        .add("_GALLTYPE_", post.galleryType)
+                        .add("secret_article_key", "")
+                        .add("clean", "")
+                        .add("nptest", "")
+                        .build()
+                    execute(buildRequest("$GALL_BASE_URL/board/comment/", headers, body)).use { response ->
+                        if (!response.isSuccessful) return@withContext null
+                        val parsed = parseMonitoredCommentPage(response.body.string())
+                            ?: return@withContext null
+                        if (page == 1) {
+                            pageCount = maxOf(1, (parsed.totalCount + 99) / 100)
+                        }
+                        parsed.comments.forEach { result[it.id] = it }
+                    }
+                    page++
+                }
+                result.values.toList()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                debugLogger.w("Cleaner", "댓글 자동 정리 댓글 조회 실패: ${post.key}", e)
+                null
+            }
+        }
+
+    suspend fun deleteMonitoredPostComment(
+        post: MonitoredWrittenPost,
+        commentId: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val ciToken = cookieManager.cookieStore.cookies.find { it.name == "ci_c" }?.value.orEmpty()
+            if (ciToken.isBlank()) return@withContext false
+            val body = FormBody.Builder()
+                .add("ci_t", ciToken)
+                .add("id", post.galleryId)
+                .add("re_no", commentId)
+                .add("mode", "del")
+                .add("g-recaptcha-response", "")
+                .add("_GALLTYPE_", post.galleryType)
+                .add("no", post.postNo)
+                .add("c_k_v", "dzc")
+                .build()
+            val headers = mapOf(
+                "Accept" to "*/*",
+                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+                "Origin" to GALL_BASE_URL,
+                "Referer" to post.postUrl,
+                "X-Requested-With" to "XMLHttpRequest"
+            )
+            execute(buildRequest("$GALL_BASE_URL/board/comment/comment_delete_submit", headers, body)).use { response ->
+                if (!response.isSuccessful) return@withContext false
+                val text = response.body.string().trim()
+                runCatching {
+                    val result = Json.parseToJsonElement(text).jsonObject["result"]?.jsonPrimitive
+                    result?.booleanOrNull == true || result?.content == "1" || result?.content == "success"
+                }.getOrDefault(text == "1" || text.equals("true", true) || text.equals("success", true))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            debugLogger.w("Cleaner", "댓글 자동 삭제 실패: ${post.key}/$commentId", e)
+            false
         }
     }
 
@@ -855,13 +1095,16 @@ class Cleaner private constructor(
         }
     }
 
+    /**
+     * 글의 상세 정보 (추천 수, 댓글 수, 조회 수) 가져오기
+     */
     override suspend fun getPostDetails(postUrl: String): PostDetails? = withContext(Dispatchers.IO) {
         try {
             val request = buildRequest(postUrl)
             execute(request).use { response ->
                 if (response.code == 404) {
                     debugLogger.d("Cleaner", "Post details returned 404, treating counts as zero - URL: $postUrl")
-                    return@withContext PostDetails(recommendCount = 0, commentCount = 0)
+                    return@withContext PostDetails(recommendCount = 0, commentCount = 0, viewCount = 0)
                 }
 
                 if (!response.isSuccessful) {
@@ -873,9 +1116,12 @@ class Cleaner private constructor(
                 if (html.isBlank()) return@withContext null
                 val doc = Jsoup.parse(html)
                 val recommendElement = doc.selectFirst(".fr .gall_reply_num")
-                val commentElement = doc.selectFirst(".fr .gall_comment a")
+                val commentWrap = doc.selectFirst(".comment_wrap[data-comment-cnt]")
+                val legacyCommentElement = doc.selectFirst(".fr .gall_comment a")
+                val viewElement = doc.selectFirst(".fr .gall_count")
 
-                if (recommendElement == null && commentElement == null) {
+                // 로그인/차단 페이지처럼 상세 정보 DOM 자체가 없으면 0으로 간주하지 않는다.
+                if (recommendElement == null && commentWrap == null && legacyCommentElement == null && viewElement == null) {
                     debugLogger.w("Cleaner", "Post details DOM not found - URL: $postUrl")
                     return@withContext null
                 }
@@ -883,12 +1129,19 @@ class Cleaner private constructor(
                 val recommendCount = recommendElement?.text()
                     ?.replace("[^0-9]".toRegex(), "")
                     ?.toIntOrNull() ?: if (recommendElement != null) 0 else null
-                val commentCount = commentElement?.text()
+                val commentCount = commentWrap?.attr("data-comment-cnt")
                     ?.replace("[^0-9]".toRegex(), "")
-                    ?.toIntOrNull() ?: if (commentElement != null) 0 else null
+                    ?.toIntOrNull()
+                    ?: legacyCommentElement?.text()
+                        ?.replace("[^0-9]".toRegex(), "")
+                        ?.toIntOrNull()
+                    ?: if (commentWrap != null || legacyCommentElement != null) 0 else null
+                val viewCount = viewElement?.text()
+                    ?.replace("[^0-9]".toRegex(), "")
+                    ?.toIntOrNull() ?: if (viewElement != null) 0 else null
 
-                debugLogger.d("Cleaner", "Post details - URL: $postUrl, 추천: $recommendCount, 댓글: $commentCount")
-                return@withContext PostDetails(recommendCount, commentCount)
+                debugLogger.d("Cleaner", "Post details - URL: $postUrl, 추천: $recommendCount, 댓글: $commentCount, 조회: $viewCount")
+                return@withContext PostDetails(recommendCount, commentCount, viewCount)
             }
         } catch (e: CancellationException) {
             throw e
@@ -898,6 +1151,9 @@ class Cleaner private constructor(
         }
     }
 
+    /**
+     * 글의 작성자 UID 가져오기 (내 글 필터용)
+     */
     override suspend fun getPostWriterUid(postUrl: String): String? = withContext(Dispatchers.IO) {
         try {
             val request = buildRequest(postUrl)
@@ -933,6 +1189,16 @@ class Cleaner private constructor(
                     return@withContext GallListResult.Blocked
                 }
 
+                val loginButton = doc.selectFirst("a.btn_top_loginout")
+                val loginRequired =
+                    loginButton?.text()?.trim() == "로그인" ||
+                            loginButton?.attr("href")?.contains("sign.dcinside.com/login") == true
+                if (loginRequired) {
+                    debugLogger.d("Cleaner", "getGallList detected an expired login session")
+                    clearAuthenticationState()
+                    return@withContext GallListResult.SessionExpired
+                }
+
                 val gallListElements =
                     doc.select("div.option_sort.gallog > div > ul > li")
                 if (gallListElements.size <= 1) {
@@ -962,8 +1228,8 @@ class Cleaner private constructor(
             logSink?.addLog("Cleaner", "2Captcha 해결 시작 - URL: $pageUrl")
             try {
                 val solver = TwoCaptcha(twocaptchaKey)
-                solver.setDefaultTimeout(180)
-                solver.setPollingInterval(10)
+                solver.setDefaultTimeout(180) // 2captcha 타임아웃 180초로 증가
+                solver.setPollingInterval(10) // 폴링 간격 10초로 증가
 
                 val captcha = ReCaptcha()
                 captcha.setSiteKey(DCINSIDE_SITE_KEY)
@@ -977,7 +1243,7 @@ class Cleaner private constructor(
                 debugLogger.d("Cleaner", "2Captcha solved token length=${captcha.code?.length ?: 0}")
                 logSink?.addLog("Cleaner", "2Captcha 해결 완료 - 토큰 길이: ${captcha.code?.length ?: 0}")
 
-                return@withContext captcha.code
+                return@withContext captcha.code // 2captcha가 준 토큰
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -987,6 +1253,9 @@ class Cleaner private constructor(
             }
         }
 
+    /**
+     * 디시인사이드 갤러리에 글 작성 (모바일 API 사용)
+     */
     override suspend fun writePost(
         galleryId: String,
         subject: String,
@@ -999,6 +1268,7 @@ class Cleaner private constructor(
 
             debugLogger.d("Cleaner", "Write post request prepared for gallery=$galleryId")
 
+            // 1단계: 글쓰기 페이지에서 CSRF 토큰과 히든 필드 수집
             val writePageRequest = buildRequest(
                 url = writeUrl,
                 headers = mapOf(
@@ -1012,11 +1282,13 @@ class Cleaner private constructor(
             val html = writePageResponse.body.string()
             val doc = Jsoup.parse(html)
 
+            // CSRF 토큰 추출
             val csrfToken = doc.select("meta[name=csrf-token]").attr("content")
             if (csrfToken.isEmpty()) {
                 return@withContext WriteResult.Failed("CSRF 토큰을 찾을 수 없습니다")
             }
 
+            // 폼 필드 수집
             val fields = mutableMapOf<String, String>()
             doc.select("#writeForm input[name], #writeForm textarea[name], #writeForm select[name]")
                 .forEach { element ->
@@ -1026,11 +1298,13 @@ class Cleaner private constructor(
                     }
                 }
 
+            // 필수 필드 설정
             fields["id"] = galleryId
             fields["route_id"] = galleryId
             fields["subject"] = subject
             fields["memo"] = content
 
+            // 허니팟 필드 처리
             val honeyFieldName = fields.keys.find { it.startsWith("honey_") }
             if (honeyFieldName != null) {
                 fields["GEY3JWF"] = honeyFieldName
@@ -1038,6 +1312,7 @@ class Cleaner private constructor(
 
             val ajaxHeaders = createMobileAjaxHeaders(csrfToken, writeUrl)
 
+            // 2단계: /ajax/access에서 Block_key 획득 (dc_check2)
             val accessFormData = FormBody.Builder()
                 .add("token_verify", "dc_check2")
                 .build()
@@ -1063,6 +1338,7 @@ class Cleaner private constructor(
                 debugLogger.w("Cleaner", "Failed to parse access response", e)
             }
 
+            // 3단계: /ajax/w_filter로 스팸 필터링
             val filterFormData = FormBody.Builder()
                 .add("subject", subject)
                 .add("memo", content)
@@ -1093,6 +1369,7 @@ class Cleaner private constructor(
                 debugLogger.w("Cleaner", "Failed to parse filter response", e)
             }
 
+            // dcblock 쿠키 찾기
             val dcblockCookie = cookieManager.cookieStore.cookies
                 .find { cookie ->
                     cookie.name.length >= 30 && cookie.name.all { it.isLetterOrDigit() }
@@ -1104,6 +1381,7 @@ class Cleaner private constructor(
                 }
             }
 
+            // 4단계: 최종 폼 데이터 구성 및 전송
             val finalFormData = FormBody.Builder()
             fields.forEach { (key, value) ->
                 if (key != "files") {
@@ -1129,6 +1407,7 @@ class Cleaner private constructor(
             debugLogger.d("Cleaner", "Write post response status=${response.code}, length=${responseText.length}")
             logSink?.addLog("Cleaner", "글 작성 응답 - status: ${response.code}, 길이: ${responseText.length}")
 
+            // 응답 파싱
             val success = response.isSuccessful &&
                     (responseText.contains("등록되었습니다") || responseText.contains("refresh") || responseText.contains(
                         "url="
@@ -1151,6 +1430,9 @@ class Cleaner private constructor(
         }
     }
 
+    /**
+     * 디시인사이드 갤러리 글에 댓글 작성 (모바일 API 사용)
+     */
     override suspend fun writeComment(
         galleryId: String,
         postNo: String,
@@ -1161,6 +1443,7 @@ class Cleaner private constructor(
             val postUrl = "$MOBILE_BASE_URL/board/$galleryId/$postNo"
             val boardReferer = "$MOBILE_BASE_URL/board/$galleryId"
 
+            // 1단계: 게시글 HTML에서 CSRF 토큰과 히든 필드 수집
             val viewRequest = buildRequest(
                 url = postUrl,
                 headers = mapOf(
@@ -1174,11 +1457,13 @@ class Cleaner private constructor(
             val html = viewResponse.body.string()
             val doc = Jsoup.parse(html)
 
+            // CSRF 토큰 추출
             val csrfToken = doc.select("meta[name=csrf-token]").attr("content")
             if (csrfToken.isEmpty()) {
                 return@withContext WriteResult.Failed("CSRF 토큰을 찾을 수 없습니다")
             }
 
+            // 히든 필드 수집
             val userId = doc.select("#user_id").attr("value")
             val boardId = doc.select("#board_id").attr("value")
             val repleId = doc.select("#reple_id").attr("value")
@@ -1192,6 +1477,7 @@ class Cleaner private constructor(
 
             val ajaxHeaders = createMobileAjaxHeaders(csrfToken, postUrl)
 
+            // 2단계: /ajax/access에서 con_key 획득 (com_submit)
             val accessFormData = FormBody.Builder()
                 .add("token_verify", "com_submit")
                 .build()
@@ -1221,6 +1507,7 @@ class Cleaner private constructor(
                 return@withContext WriteResult.Failed("댓글 작성용 키(con_key)를 얻지 못했습니다")
             }
 
+            // 3단계: cmtw_chk 쿠키 설정 (TypeScript와 동일하게)
             try {
                 val cmtwChkCookie = "cmtw_chk=$conKey; Max-Age=180; Path=/"
                 val cookieUrl = java.net.HttpCookie.parse(cmtwChkCookie).firstOrNull()
@@ -1236,6 +1523,7 @@ class Cleaner private constructor(
                 debugLogger.w("Cleaner", "Failed to set cmtw_chk cookie", e)
             }
 
+            // 4단계: 댓글 작성 요청 (TypeScript와 동일한 필드 순서 및 값)
             val commentFormData = FormBody.Builder()
                 .add("comment_memo", content)
                 .add("mode", "com_write")
@@ -1254,9 +1542,11 @@ class Cleaner private constructor(
             }
             commentFormData.add("con_key", conKey)
 
+            // 허니팟 필드 추가
             val robotField = hideRobotName.ifEmpty { "bbcdd3" }
             commentFormData.add(robotField, "1")
 
+            // 갤닉 필드 추가 (TypeScript와 동일)
             if (useGallNickname.isNotEmpty()) {
                 commentFormData.add("use_gall_nickname", useGallNickname)
             }
@@ -1279,12 +1569,14 @@ class Cleaner private constructor(
             debugLogger.d("Cleaner", "Write comment response status=${response.code}, length=${responseText.length}")
             logSink?.addLog("Cleaner", "댓글 작성 응답 - status: ${response.code}, 길이: ${responseText.length}")
 
+            // 응답 파싱
             var success = false
             try {
                 val responseData = Json.parseToJsonElement(responseText).jsonObject
                 val result = responseData["result"]?.toString()?.trim('\"')
                 success = result == "1" || result == "true"
             } catch (e: Exception) {
+                // JSON 파싱 실패시 응답 텍스트 확인
                 success = response.isSuccessful
             }
 
@@ -1305,6 +1597,9 @@ class Cleaner private constructor(
         }
     }
 
+    /**
+     * 방명록 작성
+     */
     suspend fun writeGuestbook(targetUserId: String, content: String): Boolean =
         withContext(Dispatchers.IO) {
             try {
@@ -1454,7 +1749,8 @@ class Cleaner private constructor(
                 val memoText = memo?.let(::memoTextWithLineBreaks).orEmpty()
                 val headnum = item.attr("data-headnum")
                 val isMyLog = writerId == targetUserId &&
-                        (memoText.contains("[디시클리너 모바일 가동 내역]") ||
+                        (memoText.contains("[디시클리너 모바일 & PC 가동 내역]") ||
+                                memoText.contains("[디시클리너 모바일 가동 내역]") ||
                                 memoText.contains("[디시클리너 가동내역]") ||
                                 memoText.contains("디시클리너 가동로그"))
                 if (isMyLog && headnum.isNotBlank()) {
@@ -1537,7 +1833,7 @@ class Cleaner private constructor(
         val totalPosts = rows.values.sumOf { it.postCount }
         val totalComments = rows.values.sumOf { it.commentCount }
         return buildString {
-            appendLine("[디시클리너 모바일 가동 내역]")
+            appendLine("[디시클리너 모바일 & PC 가동 내역]")
             rows.forEach { (month, count) ->
                 appendLine(
                     "%04d.%02d - 글 %s개, 댓글 %s개".format(
@@ -1580,18 +1876,16 @@ class Cleaner private constructor(
                 .add("ci_t", ciT)
                 .add("target", "icon")
                 .build()
-            val headers = mapOf(
-                "Accept" to "application/json, text/javascript, */*; q=0.01",
-                "Accept-Language" to "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
-                "Cookie" to "ci_c=$ciT; PHPSESSID=$phpSessId;",
-                "Origin" to GALL_BASE_URL,
-                "Referer" to "$GALL_BASE_URL/",
-                "X-Requested-With" to "XMLHttpRequest"
-            )
             val request = buildRequest(
                 url = "$GALL_BASE_URL/dccon/lists",
-                headers = headers,
+                headers = mapOf(
+                    "Accept" to "application/json, text/javascript, */*; q=0.01",
+                    "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Cookie" to "ci_c=$ciT; PHPSESSID=$phpSessId;",
+                    "Origin" to GALL_BASE_URL,
+                    "Referer" to "$GALL_BASE_URL/",
+                    "X-Requested-With" to "XMLHttpRequest"
+                ),
                 body = formBody
             )
 
@@ -1602,41 +1896,13 @@ class Cleaner private constructor(
                     logSink?.addLog("Cleaner", "대왕콘 진행도 확인 실패 - HTTP ${response.code}")
                     return@withContext null
                 }
-
-                val root = Json.parseToJsonElement(responseText).jsonObject
-                val bigcon = root["bigcon"]?.jsonObject ?: return@withContext null
-                val config = bigcon["config"]?.jsonObject ?: return@withContext null
-
-                val postCount = bigcon["article"]?.jsonPrimitive?.content?.toIntOrNull()
-                    ?: return@withContext null
-                val commentCount = bigcon["comment"]?.jsonPrimitive?.content?.toIntOrNull()
-                    ?: return@withContext null
-                val requiredPostCount = config["article"]?.jsonPrimitive?.content?.toIntOrNull()
-                    ?: return@withContext null
-                val requiredCommentCount = config["comment"]?.jsonPrimitive?.content?.toIntOrNull()
-                    ?: return@withContext null
-                val durationHours = config["hours"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                val status = bigcon["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
-
-                if (
-                    postCount < 0 || commentCount < 0 ||
-                    requiredPostCount <= 0 || requiredCommentCount <= 0
-                ) {
-                    return@withContext null
+                parseDaewangconProgress(responseText)?.also { progress ->
+                    logSink?.addLog(
+                        "Cleaner",
+                        "대왕콘 진행도 확인 - 글 ${progress.postCount}/${progress.requiredPostCount}, " +
+                                "댓글 ${progress.commentCount}/${progress.requiredCommentCount}"
+                    )
                 }
-
-                logSink?.addLog(
-                    "Cleaner",
-                    "대왕콘 진행도 확인 - 글 $postCount/$requiredPostCount, 댓글 $commentCount/$requiredCommentCount"
-                )
-                DaewangconProgress(
-                    postCount = postCount,
-                    commentCount = commentCount,
-                    requiredPostCount = requiredPostCount,
-                    requiredCommentCount = requiredCommentCount,
-                    durationHours = durationHours,
-                    status = status
-                )
             }
         } catch (e: CancellationException) {
             throw e
@@ -1702,6 +1968,34 @@ class Cleaner private constructor(
         }
     }
 }
+
+internal fun parseDaewangconProgress(responseText: String): DaewangconProgress? = runCatching {
+    val root = Json.parseToJsonElement(responseText).jsonObject
+    val bigcon = root["bigcon"]?.jsonObject ?: return null
+    val config = bigcon["config"]?.jsonObject ?: return null
+    val requiredPostCount = config["article"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
+    val requiredCommentCount = config["comment"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
+    val status = bigcon["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val reportedPostCount = bigcon["article"]?.jsonPrimitive?.content?.toIntOrNull()
+    val reportedCommentCount = bigcon["comment"]?.jsonPrimitive?.content?.toIntOrNull()
+    val enabledWithoutCounts = status.equals("enabled", ignoreCase = true) &&
+            reportedPostCount == null && reportedCommentCount == null
+    val postCount = reportedPostCount ?: if (enabledWithoutCounts) 0 else return null
+    val commentCount = reportedCommentCount ?: if (enabledWithoutCounts) 0 else return null
+
+    if (postCount < 0 || commentCount < 0 || requiredPostCount <= 0 || requiredCommentCount <= 0) {
+        return null
+    }
+
+    DaewangconProgress(
+        postCount = postCount,
+        commentCount = commentCount,
+        requiredPostCount = requiredPostCount,
+        requiredCommentCount = requiredCommentCount,
+        durationHours = config["hours"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+        status = status
+    )
+}.getOrNull()
 
 internal fun gallogResponseMatchesRequestedGallery(html: String, requestedGalleryNo: String): Boolean {
     if (requestedGalleryNo.isEmpty()) return true

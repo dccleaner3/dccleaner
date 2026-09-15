@@ -8,6 +8,7 @@ import com.dccleaner.app.model.CollectedPost
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskState
 import com.dccleaner.app.model.DeleteQueueCheckpoint
+import com.dccleaner.app.model.isEligibleForResume
 import com.dccleaner.app.runtime.DeleteTaskStorePort
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -37,7 +38,7 @@ class DeleteTaskStore(context: Context) : DeleteTaskStorePort {
     @Synchronized
     override fun getForLogin(loginId: String): List<DeleteTaskProgress> =
         readTasks()
-            .filter { it.loginId == loginId }
+            .filter { it.loginId == loginId && it.state.isEligibleForResume() }
             .sortedByDescending { it.updatedAt }
 
     @Synchronized

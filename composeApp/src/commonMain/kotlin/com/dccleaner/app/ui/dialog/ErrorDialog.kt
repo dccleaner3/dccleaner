@@ -14,13 +14,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun ErrorDialog(
     uiColors: UiColors,
+    title: String,
     errorMessage: String,
     onDismiss: () -> Unit
 ) {
@@ -33,13 +33,13 @@ fun ErrorDialog(
             Icon(
                 Icons.Default.Warning,
                 contentDescription = "오류",
-                tint = Color.Red,
+                tint = uiColors.danger,
                 modifier = Modifier.size(32.dp)
             )
         },
         title = {
             Text(
-                "로그인 실패",
+                title,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )

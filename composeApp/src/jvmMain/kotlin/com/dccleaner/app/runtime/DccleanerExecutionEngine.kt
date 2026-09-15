@@ -10,6 +10,7 @@ import com.dccleaner.app.model.DeleteTimeEstimator
 import com.dccleaner.app.model.PostListResult
 import com.dccleaner.app.model.WriteResult
 import com.dccleaner.app.model.deleteGalleryProgressMessage
+import com.dccleaner.app.model.replaceDeleteProgressLog
 import com.dccleaner.app.network.Cleaner
 import com.dccleaner.app.network.CleanerPort
 import com.dccleaner.app.util.formatDurationMillis
@@ -34,7 +35,6 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicInteger
 
 class DccleanerExecutionEngine(
     private val deleteTaskStore: DeleteTaskStorePort,
@@ -47,11 +47,11 @@ class DccleanerExecutionEngine(
         private const val CAPTCHA_DELETE_INTERVAL = 200
         private const val CHECKPOINT_OPERATION_INTERVAL = 20
         private const val CHECKPOINT_TIME_INTERVAL_MS = 10_000L
-        const val DAEWANGCON_POST_INTERVAL_DELAY_MILLIS = 5_000L
+        const val DAEWANGCON_POST_INTERVAL_DELAY_MILLIS = 30_000L
         const val DAEWANGCON_COMMENT_INTERVAL_DELAY_MILLIS = 0L
         const val DAEWANGCON_POST_BATCH_SIZE = 5
         const val DAEWANGCON_COMMENT_BATCH_SIZE = 10
-        const val DAEWANGCON_POST_BATCH_DELAY_MILLIS = 105_000L
+        const val DAEWANGCON_POST_BATCH_DELAY_MILLIS = 0L
         const val DAEWANGCON_COMMENT_BATCH_DELAY_MILLIS = 90_000L
     }
 
@@ -67,6 +67,7 @@ class DccleanerExecutionEngine(
     private var lastCheckpointAt = 0L
     private var minRecommendToKeep: Int = -1
     private var minCommentToKeep: Int = -1
+    private var minViewToKeep: Int = -1
     private var postContentRegex: String = ""
     private var myPostFilterEnabled: Boolean = false
     private var dcconOnlyFilterEnabled: Boolean = false
@@ -167,12 +168,15 @@ class DccleanerExecutionEngine(
         twoCaptchaApiKey: String = "",
         recommendFilterEnabled: Boolean = false,
         commentFilterEnabled: Boolean = false,
+        viewFilterEnabled: Boolean = false,
         postContentFilterEnabled: Boolean = false,
         commentContentFilterEnabled: Boolean = false,
         dateFilterEnabled: Boolean = false,
         deleteNewestFirst: Boolean = false,
+        deleteQuestionPosts: Boolean = false,
         minRecommendToKeep: Int = -1,
         minCommentToKeep: Int = -1,
+        minViewToKeep: Int = -1,
         myPostFilterEnabled: Boolean = false,
         dcconOnlyFilterEnabled: Boolean = false,
         postContentRegex: String = "",
@@ -188,12 +192,15 @@ class DccleanerExecutionEngine(
             twoCaptchaApiKey = twoCaptchaApiKey,
             recommendFilterEnabled = recommendFilterEnabled,
             commentFilterEnabled = commentFilterEnabled,
+            viewFilterEnabled = viewFilterEnabled,
             postContentFilterEnabled = postContentFilterEnabled,
             commentContentFilterEnabled = commentContentFilterEnabled,
             dateFilterEnabled = dateFilterEnabled,
             deleteNewestFirst = deleteNewestFirst,
+            deleteQuestionPosts = deleteQuestionPosts,
             minRecommendToKeep = minRecommendToKeep,
             minCommentToKeep = minCommentToKeep,
+            minViewToKeep = minViewToKeep,
             myPostFilterEnabled = myPostFilterEnabled,
             dcconOnlyFilterEnabled = dcconOnlyFilterEnabled,
             postContentRegex = postContentRegex,
@@ -216,11 +223,7 @@ class DccleanerExecutionEngine(
     fun stopDeletion(preserveTask: Boolean = false) {
         val jobToStop = synchronized(deleteJobLock) { deleteJob }
         if (!preserveTask && jobToStop?.isActive == true) {
-            pauseCurrentTask(
-                DeleteTaskState.PAUSED_BY_USER,
-                "사용자가 작업을 중단했습니다.",
-                notify = false
-            )
+            discardCurrentTaskByUser()
         }
         synchronized(deleteJobLock) {
             pendingDeleteTask = null
@@ -234,6 +237,19 @@ class DccleanerExecutionEngine(
                 _captchaFlag.value = false
                 _showCaptchaDialog.value = false
             }
+        }
+    }
+
+    @Synchronized
+    private fun discardCurrentTaskByUser() {
+        val task = currentTask ?: return
+        currentTask = null
+        if (!deleteTaskStore.remove(task.id)) {
+            deleteTaskStore.updateState(
+                task.id,
+                DeleteTaskState.PAUSED_BY_USER,
+                "사용자가 작업을 중단했습니다."
+            )
         }
     }
 
@@ -264,7 +280,7 @@ class DccleanerExecutionEngine(
                 captchaRequired = false
             )
         }
-        addLogMessage("✅ 캡챠 해결 완료 - 삭제 재개")
+        updateDeleteProgressStatus("✅ 캡챠 해결 완료 - 삭제 재개")
     }
 
     fun startDaewangcon(
@@ -323,6 +339,7 @@ class DccleanerExecutionEngine(
         cleaner?.restore2CaptchaKey(task.twoCaptchaApiKey)
         minRecommendToKeep = task.minRecommendToKeep
         minCommentToKeep = task.minCommentToKeep
+        minViewToKeep = task.minViewToKeep
         postContentRegex = task.postContentRegex
         myPostFilterEnabled = task.myPostFilterEnabled
         dcconOnlyFilterEnabled = task.dcconOnlyFilterEnabled
@@ -563,17 +580,12 @@ class DccleanerExecutionEngine(
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val marker = if (finished) "" else DELETE_PROGRESS_LOG_MARKER
         val timestampedMessage = "[$timestamp] $marker$message"
-        _deleteLog.update { logs ->
-            val progressIndex = logs.indexOfLast { it.contains(DELETE_PROGRESS_LOG_MARKER) }
-            if (progressIndex < 0) {
-                logs + timestampedMessage
-            } else {
-                logs.toMutableList().apply {
-                    removeAt(progressIndex)
-                    add(timestampedMessage)
-                }
-            }
-        }
+        _deleteLog.update { it.replaceDeleteProgressLog(timestampedMessage) }
+    }
+
+    private fun updateDeleteProgressStatus(message: String, finished: Boolean = false) {
+        updateGalleryProgressLog(message, finished)
+        scope.launch { logSink.addLog("Delete", message) }
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -975,14 +987,36 @@ class DccleanerExecutionEngine(
                     }
                 }
 
-                if (deleteType == "posting" && (minRecommendToKeep >= 0 || minCommentToKeep >= 0)) {
+                val regexFilterMismatch =
+                    (deleteType == "posting" && initialTask.postContentFilterEnabled &&
+                        !matchesTextRegex(cleaner.getPostText(postNo), postContentRegex)) ||
+                        (deleteType == "comment" && initialTask.commentContentFilterEnabled &&
+                            !matchesTextRegex(cleaner.getPostText(postNo), commentRegexFilter))
+                if (regexFilterMismatch) {
+                    gallerySkipped++
+                    logSink.addLog("Service", "정규식 필터 불일치 - 건너뛰기 - postNo: $postNo")
+                    cleaner.removeFirstPost()
+                    if (!checkpointItemProgress(galleryDeleted, gallerySkipped, totalDeleted)) return
+                    updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, galleryDeleted, gallerySkipped, postCount))
+                    updateCurrentGalleryEstimatedTimeLeft(deletionStartedAt, initialGalleryDeleted, initialGallerySkipped, galleryDeleted, gallerySkipped, postCount)
+                    continue
+                }
+
+                if (deleteType == "posting" &&
+                    (minRecommendToKeep >= 0 || minCommentToKeep >= 0 || minViewToKeep >= 0)
+                ) {
                     val postUrl = cleaner.getPostUrl(postNo)
                     val postDetails = if (postUrl == null) null else {
                         delay(timing.postRequestDelayMillis)
                         logSink.addLog("Service", "글 상세 정보 확인 중 - postNo: $postNo")
                         cleaner.getPostDetails(postUrl)
                     }
-                    if (postDetails == null || !postDetails.hasCountsRequiredBy(initialTask.recommendFilterEnabled, initialTask.commentFilterEnabled)) {
+                    if (postDetails == null || !postDetails.hasCountsRequiredBy(
+                            initialTask.recommendFilterEnabled,
+                            initialTask.commentFilterEnabled,
+                            initialTask.viewFilterEnabled
+                        )
+                    ) {
                         gallerySkipped++
                         cleaner.removeFirstPost()
                         if (!checkpointItemProgress(galleryDeleted, gallerySkipped, totalDeleted)) return
@@ -992,7 +1026,8 @@ class DccleanerExecutionEngine(
                     }
                     val shouldSkip =
                         (minRecommendToKeep >= 0 && postDetails.recommendCount?.let { it >= minRecommendToKeep } == true) ||
-                                (minCommentToKeep >= 0 && postDetails.commentCount?.let { it >= minCommentToKeep } == true)
+                                (minCommentToKeep >= 0 && postDetails.commentCount?.let { it >= minCommentToKeep } == true) ||
+                                (minViewToKeep >= 0 && postDetails.viewCount?.let { it >= minViewToKeep } == true)
                     if (shouldSkip) {
                         gallerySkipped++
                         cleaner.removeFirstPost()
@@ -1003,10 +1038,8 @@ class DccleanerExecutionEngine(
                     }
                 }
 
-                if (deleteType == "comment" &&
-                    (myPostFilterEnabled || dcconOnlyFilterEnabled || initialTask.commentContentFilterEnabled)
-                ) {
-                    val matches = matchesCommentFilter(cleaner, postNo, initialTask)
+                if (deleteType == "comment" && (myPostFilterEnabled || dcconOnlyFilterEnabled)) {
+                    val matches = matchesCommentTypeFilter(cleaner, postNo)
                     if (!matches) {
                         gallerySkipped++
                         logSink.addLog("Service", "필터 불일치 - 건너뛰기 - postNo: $postNo")
@@ -1018,23 +1051,23 @@ class DccleanerExecutionEngine(
                     }
                 }
 
-                if (deleteType == "posting" && initialTask.postContentFilterEnabled &&
-                    !matchesTextRegex(cleaner.getPostText(postNo), postContentRegex)
-                ) {
-                    gallerySkipped++
-                    logSink.addLog("Service", "글 내용 필터 불일치 - 건너뛰기 - postNo: $postNo")
-                    cleaner.removeFirstPost()
-                    if (!checkpointItemProgress(galleryDeleted, gallerySkipped, totalDeleted)) return
-                    updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, galleryDeleted, gallerySkipped, postCount))
-                    updateCurrentGalleryEstimatedTimeLeft(deletionStartedAt, initialGalleryDeleted, initialGallerySkipped, galleryDeleted, gallerySkipped, postCount)
-                    continue
-                }
-
                 logSink.addLog("Service", "글 삭제 시도 - postNo: $postNo (일반)")
                 markCaptchaDeletionAttemptStarted()
-                var deleteResult = cleaner.deletePost(postNo, deleteType, solveCaptcha = false)
+                var deleteResult = cleaner.deletePost(
+                    postNo,
+                    deleteType,
+                    solveCaptcha = false,
+                    deleteQuestionPosts = initialTask.deleteQuestionPosts
+                )
                 if (deleteResult is DeleteResult.Error && isCaptchaError(deleteResult.message)) {
-                    val captchaResult = handleCaptcha(cleaner, postNo, deleteType, galleryName, postCount)
+                    val captchaResult = handleCaptcha(
+                        cleaner,
+                        postNo,
+                        deleteType,
+                        galleryName,
+                        postCount,
+                        initialTask.deleteQuestionPosts
+                    )
                     if (captchaResult == null) return
                     deleteResult = captchaResult.result
                     if (deleteResult is DeleteResult.Success) {
@@ -1066,10 +1099,18 @@ class DccleanerExecutionEngine(
                         is DeleteResult.Failed -> "네트워크 오류"
                         is DeleteResult.Blocked -> "접속 차단"
                         is DeleteResult.Error -> "삭제 오류: ${deleteResult.message.take(100)}"
+                        is DeleteResult.Excluded -> "삭제 확인 필요: ${deleteResult.message.take(100)}"
                         is DeleteResult.Success -> "알 수 없는 오류"
                     }
                     gallerySkipped++
-                    addLogMessage("⏭️ $galleryName: $postNo 삭제 실패로 건너뜀 ($failureReason)")
+                    logSink.addLog(
+                        "Delete",
+                        if (deleteResult is DeleteResult.Excluded) {
+                            "$galleryName: $postNo 삭제 제외됨 ($failureReason)"
+                        } else {
+                            "$galleryName: $postNo 삭제 실패로 건너뜀 ($failureReason)"
+                        }
+                    )
                     captchaDeleteAttemptStartedAt = 0L
                     if (!checkpointItemProgress(galleryDeleted, gallerySkipped, totalDeleted, force = true)) return
                     cleaner.removeFirstPost()
@@ -1118,7 +1159,7 @@ class DccleanerExecutionEngine(
         if (initialTask.recordGuestbookLog) {
             val deletedPosts = if (deleteType == "posting") totalDeleted else 0
             val deletedComments = if (deleteType == "comment") totalDeleted else 0
-            addLogMessage("📝 방명록 가동 기록 작성 중")
+            updateDeleteProgressStatus("📝 방명록 가동 기록 작성 중")
             val logged = try {
                 cleaner.recordCleanerRunGuestbookLog(
                     deletedPosts,
@@ -1133,8 +1174,11 @@ class DccleanerExecutionEngine(
                 addLogMessage("⚠️ 방명록 가동 기록 작성 실패: ${e.message ?: "알 수 없는 오류"}")
                 false
             }
-            if (logged) addLogMessage("✅ 방명록 가동 기록 작성 완료")
-            else addLogMessage("⚠️ 방명록 가동 기록 작성 실패")
+            if (logged) {
+                updateDeleteProgressStatus("✅ 방명록 가동 기록 작성 완료", finished = true)
+            } else {
+                updateDeleteProgressStatus("⚠️ 방명록 가동 기록 작성 실패", finished = true)
+            }
         }
         _isCompleted.value = true
         _currentGalleryEstimatedTimeLeft.value = 0L
@@ -1163,15 +1207,18 @@ class DccleanerExecutionEngine(
             var galleryDeleted = if (resumingGallery) savedTask.currentGalleryDeleted else 0
             var gallerySkipped = if (resumingGallery) savedTask.currentGallerySkipped else 0
             var page = if (resumingGallery) savedTask.newestFirstPage.coerceAtLeast(1) else 1
+            // Gson restores a newly added missing Int field as 0 for old checkpoints.
+            // A resumable gallery necessarily had at least one item, so only positive totals are reusable.
+            var galleryTotal = savedTask.newestFirstTotalCount.takeIf { resumingGallery && it > 0 }
             val terminalPosts = mutableSetOf<String>()
             currentGalleryCaptchaSolved =
                 if (resumingGallery) savedTask.currentGalleryCaptchaSolved else 0
 
-            _currentGalleryEstimatedTimeLeft.value = -1L
+            _currentGalleryEstimatedTimeLeft.value = if (galleryTotal == null) -1L else 0L
             _currentGallery.value = galleryName
-            startGalleryLog(galleryName, itemLabel, total = null)
+            startGalleryLog(galleryName, itemLabel, total = galleryTotal)
             updateGalleryProgressLog(
-                galleryProgressMessage(galleryName, itemLabel, galleryDeleted, gallerySkipped, total = null)
+                galleryProgressMessage(galleryName, itemLabel, galleryDeleted, gallerySkipped, total = galleryTotal)
             )
             if (!updateTask(force = true) {
                     it.copy(
@@ -1185,10 +1232,14 @@ class DccleanerExecutionEngine(
                         state = DeleteTaskState.RUNNING,
                         statusMessage = "$galleryName 최근 ${itemLabel}부터 삭제 중",
                         captchaRequired = false,
-                        newestFirstPage = page
+                        newestFirstPage = page,
+                        newestFirstTotalCount = galleryTotal ?: -1
                     )
                 }) return
 
+            val deletionStartedAt = System.currentTimeMillis()
+            val initialGalleryDeleted = galleryDeleted
+            val initialGallerySkipped = gallerySkipped
             var galleryFinished = false
             while (!galleryFinished && currentCoroutineContext().isActive) {
                 val task = currentTask ?: return
@@ -1226,6 +1277,24 @@ class DccleanerExecutionEngine(
                     val pageResult = cleaner.getPostList(gno, initialTask.deleteType, page)
                     val pagePosts = when (pageResult) {
                         is PostListResult.Success -> {
+                            if (galleryTotal == null && pageResult.totalCount != null) {
+                                // On an old resumed task the DOM count excludes already deleted items,
+                                // while skipped items are still present in the gallog list.
+                                val discoveredTotal = pageResult.totalCount + galleryDeleted
+                                galleryTotal = discoveredTotal
+                                if (!updateTask(force = true) {
+                                        it.copy(newestFirstTotalCount = discoveredTotal)
+                                    }) return
+                                updateGalleryProgressLog(
+                                    galleryProgressMessage(
+                                        galleryName,
+                                        itemLabel,
+                                        galleryDeleted,
+                                        gallerySkipped,
+                                        galleryTotal
+                                    )
+                                )
+                            }
                             if (!pageResult.requestedGalleryMatched) {
                                 addLogMessage("✅ $galleryName: 선택한 갤러리에 남은 $itemLabel 없음")
                                 galleryFinished = true
@@ -1306,7 +1375,11 @@ class DccleanerExecutionEngine(
                     galleryDeleted = galleryDeleted,
                     gallerySkipped = gallerySkipped,
                     totalDeleted = totalDeleted,
-                    terminalPosts = terminalPosts
+                    terminalPosts = terminalPosts,
+                    galleryTotal = galleryTotal,
+                    deletionStartedAt = deletionStartedAt,
+                    initialGalleryDeleted = initialGalleryDeleted,
+                    initialGallerySkipped = initialGallerySkipped
                 ) ?: return
                 galleryDeleted = result.galleryDeleted
                 gallerySkipped = result.gallerySkipped
@@ -1344,7 +1417,7 @@ class DccleanerExecutionEngine(
                 itemLabel,
                 galleryDeleted,
                 gallerySkipped,
-                total = null
+                total = galleryTotal
             )
             completedGalleries++
             _progress.value = completedGalleries.toFloat() / totalGalleries.toFloat()
@@ -1364,6 +1437,7 @@ class DccleanerExecutionEngine(
                         hasPersistedQueue = false,
                         newestFirstPage = 1,
                         newestFirstBatchStartDeleted = 0,
+                        newestFirstTotalCount = -1,
                         statusMessage = "$galleryName 처리 완료"
                     )
                 }) return
@@ -1381,12 +1455,31 @@ class DccleanerExecutionEngine(
         galleryDeleted: Int,
         gallerySkipped: Int,
         totalDeleted: Int,
-        terminalPosts: MutableSet<String>
+        terminalPosts: MutableSet<String>,
+        galleryTotal: Int?,
+        deletionStartedAt: Long,
+        initialGalleryDeleted: Int,
+        initialGallerySkipped: Int
     ): NewestFirstBatchResult? {
         var deleted = galleryDeleted
         var skipped = gallerySkipped
         var deletedTotal = totalDeleted
         val itemLabel = if (task.deleteType == "posting") "글" else "댓글"
+        fun updateProgress() {
+            updateGalleryProgressLog(
+                galleryProgressMessage(galleryName, itemLabel, deleted, skipped, galleryTotal)
+            )
+            galleryTotal?.let { total ->
+                updateCurrentGalleryEstimatedTimeLeft(
+                    deletionStartedAt,
+                    initialGalleryDeleted,
+                    initialGallerySkipped,
+                    deleted,
+                    skipped,
+                    total
+                )
+            }
+        }
 
         while (cleaner.getPostListSize() > 0 && currentCoroutineContext().isActive) {
             val postNo = cleaner.getFirstPost() ?: break
@@ -1397,68 +1490,87 @@ class DccleanerExecutionEngine(
                     terminalPosts += postNo
                     cleaner.removeFirstPost()
                     if (!checkpointItemProgress(deleted, skipped, deletedTotal)) return null
-                    updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
+                    updateProgress()
                     continue
                 }
             }
 
+            val regexFilterMismatch =
+                (task.deleteType == "posting" && task.postContentFilterEnabled &&
+                    !matchesTextRegex(cleaner.getPostText(postNo), postContentRegex)) ||
+                    (task.deleteType == "comment" && task.commentContentFilterEnabled &&
+                        !matchesTextRegex(cleaner.getPostText(postNo), commentRegexFilter))
+            if (regexFilterMismatch) {
+                skipped++
+                terminalPosts += postNo
+                cleaner.removeFirstPost()
+                if (!checkpointItemProgress(deleted, skipped, deletedTotal)) return null
+                updateProgress()
+                continue
+            }
+
             if (task.deleteType == "posting" &&
-                (minRecommendToKeep >= 0 || minCommentToKeep >= 0)
+                (minRecommendToKeep >= 0 || minCommentToKeep >= 0 || minViewToKeep >= 0)
             ) {
                 val postUrl = cleaner.getPostUrl(postNo)
                 val postDetails = if (postUrl == null) null else {
                     delay(timing.postRequestDelayMillis)
                     cleaner.getPostDetails(postUrl)
                 }
-                if (postDetails == null || !postDetails.hasCountsRequiredBy(task.recommendFilterEnabled, task.commentFilterEnabled)) {
+                if (postDetails == null || !postDetails.hasCountsRequiredBy(
+                        task.recommendFilterEnabled,
+                        task.commentFilterEnabled,
+                        task.viewFilterEnabled
+                    )
+                ) {
                     skipped++
                     terminalPosts += postNo
                     cleaner.removeFirstPost()
                     if (!checkpointItemProgress(deleted, skipped, deletedTotal)) return null
-                    updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
+                    updateProgress()
                     continue
                 }
                 val shouldKeep =
                     (minRecommendToKeep >= 0 && postDetails.recommendCount?.let { it >= minRecommendToKeep } == true) ||
-                            (minCommentToKeep >= 0 && postDetails.commentCount?.let { it >= minCommentToKeep } == true)
+                            (minCommentToKeep >= 0 && postDetails.commentCount?.let { it >= minCommentToKeep } == true) ||
+                            (minViewToKeep >= 0 && postDetails.viewCount?.let { it >= minViewToKeep } == true)
                 if (shouldKeep) {
                     skipped++
                     terminalPosts += postNo
                     cleaner.removeFirstPost()
                     if (!checkpointItemProgress(deleted, skipped, deletedTotal)) return null
-                    updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
+                    updateProgress()
                     continue
                 }
             }
 
-            if (task.deleteType == "comment" &&
-                (myPostFilterEnabled || dcconOnlyFilterEnabled || task.commentContentFilterEnabled)
-            ) {
-                if (!matchesCommentFilter(cleaner, postNo, task)) {
+            if (task.deleteType == "comment" && (myPostFilterEnabled || dcconOnlyFilterEnabled)) {
+                if (!matchesCommentTypeFilter(cleaner, postNo)) {
                     skipped++
                     terminalPosts += postNo
                     cleaner.removeFirstPost()
                     if (!checkpointItemProgress(deleted, skipped, deletedTotal)) return null
-                    updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
+                    updateProgress()
                     continue
                 }
             }
 
-            if (task.deleteType == "posting" && task.postContentFilterEnabled &&
-                !matchesTextRegex(cleaner.getPostText(postNo), postContentRegex)
-            ) {
-                skipped++
-                terminalPosts += postNo
-                cleaner.removeFirstPost()
-                if (!checkpointItemProgress(deleted, skipped, deletedTotal)) return null
-                updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
-                continue
-            }
-
             markCaptchaDeletionAttemptStarted()
-            var deleteResult = cleaner.deletePost(postNo, task.deleteType, solveCaptcha = false)
+            var deleteResult = cleaner.deletePost(
+                postNo,
+                task.deleteType,
+                solveCaptcha = false,
+                deleteQuestionPosts = task.deleteQuestionPosts
+            )
             if (deleteResult is DeleteResult.Error && isCaptchaError(deleteResult.message)) {
-                val captchaResult = handleCaptcha(cleaner, postNo, task.deleteType, galleryName, batchSize)
+                val captchaResult = handleCaptcha(
+                    cleaner,
+                    postNo,
+                    task.deleteType,
+                    galleryName,
+                    batchSize,
+                    task.deleteQuestionPosts
+                )
                     ?: return null
                 deleteResult = captchaResult.result
                 if (deleteResult is DeleteResult.Success) {
@@ -1468,7 +1580,7 @@ class DccleanerExecutionEngine(
                     if (!checkpointItemProgress(deleted, skipped, deletedTotal, force = true)) return null
                     cleaner.removeFirstPost()
                     recordSuccessfulDeletionForCaptchaEstimate()
-                    updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
+                    updateProgress()
                     delay(timing.captchaSettleDelayMillis)
                     continue
                 }
@@ -1480,15 +1592,22 @@ class DccleanerExecutionEngine(
                 if (!checkpointItemProgress(deleted, skipped, deletedTotal, force = true)) return null
                 cleaner.removeFirstPost()
                 recordSuccessfulDeletionForCaptchaEstimate()
-                updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
+                updateProgress()
             } else {
                 skipped++
                 terminalPosts += postNo
-                addLogMessage("⏭️ $galleryName: $postNo 삭제 실패로 건너뜀")
+                logSink.addLog(
+                    "Delete",
+                    if (deleteResult is DeleteResult.Excluded) {
+                        "$galleryName: $postNo 삭제 제외됨 (삭제 확인 필요: ${deleteResult.message.take(100)})"
+                    } else {
+                        "$galleryName: $postNo 삭제 실패로 건너뜀"
+                    }
+                )
                 captchaDeleteAttemptStartedAt = 0L
                 if (!checkpointItemProgress(deleted, skipped, deletedTotal, force = true)) return null
                 cleaner.removeFirstPost()
-                updateGalleryProgressLog(galleryProgressMessage(galleryName, itemLabel, deleted, skipped, total = null))
+                updateProgress()
             }
             delay(timing.postRequestDelayMillis)
         }
@@ -1513,7 +1632,7 @@ class DccleanerExecutionEngine(
         if (initialTask.recordGuestbookLog) {
             val deletedPosts = if (initialTask.deleteType == "posting") totalDeleted else 0
             val deletedComments = if (initialTask.deleteType == "comment") totalDeleted else 0
-            addLogMessage("📝 방명록 가동 기록 작성 중")
+            updateDeleteProgressStatus("📝 방명록 가동 기록 작성 중")
             val logged = try {
                 cleaner.recordCleanerRunGuestbookLog(
                     deletedPosts,
@@ -1528,8 +1647,11 @@ class DccleanerExecutionEngine(
                 addLogMessage("⚠️ 방명록 가동 기록 작성 실패: ${e.message ?: "알 수 없는 오류"}")
                 false
             }
-            if (logged) addLogMessage("✅ 방명록 가동 기록 작성 완료")
-            else addLogMessage("⚠️ 방명록 가동 기록 작성 실패")
+            if (logged) {
+                updateDeleteProgressStatus("✅ 방명록 가동 기록 작성 완료", finished = true)
+            } else {
+                updateDeleteProgressStatus("⚠️ 방명록 가동 기록 작성 실패", finished = true)
+            }
         }
         _isCompleted.value = true
         _currentGalleryEstimatedTimeLeft.value = 0L
@@ -1544,15 +1666,11 @@ class DccleanerExecutionEngine(
         val totalDeleted: Int
     )
 
-    private suspend fun matchesCommentFilter(
+    private suspend fun matchesCommentTypeFilter(
         cleaner: CleanerPort,
-        postNo: String,
-        task: DeleteTaskProgress
+        postNo: String
     ): Boolean {
         if (dcconOnlyFilterEnabled && cleaner.isPostDccon(postNo)) return true
-        if (task.commentContentFilterEnabled) {
-            if (matchesTextRegex(cleaner.getPostText(postNo), commentRegexFilter)) return true
-        }
         if (myPostFilterEnabled) {
             val postUrl = cleaner.getPostUrl(postNo)
             if (postUrl != null) {
@@ -1588,7 +1706,8 @@ class DccleanerExecutionEngine(
         postNo: String,
         deleteType: String,
         galleryName: String,
-        postCount: Int
+        postCount: Int,
+        deleteQuestionPosts: Boolean
     ): CaptchaDeleteResult? {
         var captchaSolved = false
         val maxRetries = if (_isTwoCaptchaConfigured.value) 3 else 0
@@ -1597,13 +1716,18 @@ class DccleanerExecutionEngine(
 
         while (retryCount < maxRetries && !captchaSolved) {
             retryCount++
-            addLogMessage("⚠️ 캡챠 감지됨 - 자동 해결 시도 ($retryCount/$maxRetries)")
-            deleteResult = cleaner.deletePost(postNo, deleteType, solveCaptcha = true)
+            updateDeleteProgressStatus("⚠️ 캡챠 감지됨 - 자동 해결 시도 ($retryCount/$maxRetries)")
+            deleteResult = cleaner.deletePost(
+                postNo,
+                deleteType,
+                solveCaptcha = true,
+                deleteQuestionPosts = deleteQuestionPosts
+            )
             if (deleteResult is DeleteResult.Success) {
                 captchaSolved = true
             } else if (deleteResult is DeleteResult.Error) {
                 if (retryCount < maxRetries) {
-                    addLogMessage("⚠️ 2captcha 실패 - 재시도 중... ($retryCount/$maxRetries)")
+                    updateDeleteProgressStatus("⚠️ 2captcha 실패 - 재시도 중... ($retryCount/$maxRetries)")
                     delay(timing.captchaRetryDelayMillis)
                 }
             } else {
@@ -1612,8 +1736,11 @@ class DccleanerExecutionEngine(
         }
 
         if (!captchaSolved && deleteResult is DeleteResult.Error) {
-            if (_isTwoCaptchaConfigured.value) addLogMessage("⚠️ 2captcha 3번 실패 - 수동 해결 필요")
-            else addLogMessage("⚠️ 캡챠 감지됨 - 수동 해결 필요")
+            if (_isTwoCaptchaConfigured.value) {
+                updateDeleteProgressStatus("⚠️ 2captcha 3번 실패 - 수동 해결 필요")
+            } else {
+                updateDeleteProgressStatus("⚠️ 캡챠 감지됨 - 수동 해결 필요")
+            }
             _captchaFlag.value = true
             _showCaptchaDialog.value = true
             _nextCaptchaEstimatedTimeLeft.value = 0L
@@ -1638,7 +1765,12 @@ class DccleanerExecutionEngine(
                         )
                     }) return null
                 return CaptchaDeleteResult(
-                    result = cleaner.deletePost(postNo, deleteType, solveCaptcha = false),
+                    result = cleaner.deletePost(
+                        postNo,
+                        deleteType,
+                        solveCaptcha = false,
+                        deleteQuestionPosts = deleteQuestionPosts
+                    ),
                     solvedManually = true
                 )
             }
@@ -1685,77 +1817,113 @@ class DccleanerExecutionEngine(
             return
         }
         addDaewangconLog("🎯 대왕콘 얻기 시작")
-        val totalTasks = 30
-        val completedTasks = AtomicInteger(0)
-        fun recordDaewangconProgress() {
-            val completed = completedTasks.incrementAndGet()
-            val progress = completed.toFloat() / totalTasks.toFloat()
-            _daewangconProgress.update { current -> maxOf(current, progress) }
+        addDaewangconLog("🔎 디시 서버에서 현재 진행도 확인 중...")
+        val initialProgress = cleaner.getDaewangconProgress() ?: run {
+            val message = "대왕콘 진행도를 확인하지 못해 자동 작성을 시작하지 않았습니다."
+            _daewangconErrorMessage.value = message
+            addDaewangconLog("❌ $message")
+            return
+        }
+        var requiredPostCount = initialProgress.requiredPostCount
+        var requiredCommentCount = initialProgress.requiredCommentCount
+        fun updateDaewangconProgress() {
+            val completed =
+                _daewangconPostCount.value.coerceIn(0, requiredPostCount) +
+                        _daewangconCommentCount.value.coerceIn(0, requiredCommentCount)
+            _daewangconProgress.value = completed.toFloat() / (requiredPostCount + requiredCommentCount)
+        }
+        _daewangconPostCount.value = initialProgress.postCount
+        _daewangconCommentCount.value = initialProgress.commentCount
+        updateDaewangconProgress()
+
+        val postsNeeded = initialProgress.remainingPostCount
+        val commentsNeeded = initialProgress.remainingCommentCount
+        addDaewangconLog(
+            "📊 현재 글 ${initialProgress.postCount}/$requiredPostCount, " +
+                    "댓글 ${initialProgress.commentCount}/$requiredCommentCount"
+        )
+        addDaewangconLog("✍️ 추가 필요: 글 ${postsNeeded}개, 댓글 ${commentsNeeded}개")
+        if (initialProgress.requirementsMet) {
+            addDaewangconLog("✅ 작성 조건을 이미 충족해 추가 작성 없이 설정을 진행합니다.")
         }
 
         coroutineScope {
-            launch {
-                addDaewangconLog("📝 글 작성 시작 (10개)")
-                for (i in 1..10) {
+            if (postsNeeded > 0) launch {
+                addDaewangconLog("📝 글 작성 시작 (${postsNeeded}개)")
+                for (i in 1..postsNeeded) {
                     currentCoroutineContext().ensureActive()
                     if (i > 1 && (i - 1) % DAEWANGCON_POST_BATCH_SIZE == 0 && timing.daewangconPostBatchDelayMillis > 0L) {
                         addDaewangconLog("⏳ ${formatDurationMillis(timing.daewangconPostBatchDelayMillis)} 대기 중... (글쓰기 제한)")
                         delay(timing.daewangconPostBatchDelayMillis)
                     }
-                    val postText = createDaewangconText(i)
+                    val postText = createDaewangconText(_daewangconPostCount.value + 1)
                     val result = cleaner.writePost("kingcon", postText, postText)
                     if (result is WriteResult.Success) {
                         _daewangconPostCount.update { it + 1 }
-                        recordDaewangconProgress()
-                        addDaewangconLog("✅ 글 작성 완료 ($i/10)")
+                        updateDaewangconProgress()
+                        addDaewangconLog("✅ 글 작성 완료 (${_daewangconPostCount.value}/$requiredPostCount)")
                     } else if (result is WriteResult.Failed) {
-                        addDaewangconLog("❌ 글 작성 실패 ($i/10): ${result.message}")
+                        addDaewangconLog("❌ 글 작성 실패 ($i/$postsNeeded): ${result.message}")
                     }
-                    if (i < 10 && timing.daewangconPostIntervalDelayMillis > 0L) delay(timing.daewangconPostIntervalDelayMillis)
+                    if (i < postsNeeded && timing.daewangconPostIntervalDelayMillis > 0L) delay(timing.daewangconPostIntervalDelayMillis)
                 }
             }
-            launch {
-                addDaewangconLog("💬 댓글 작성 시작 (20개)")
-                for (i in 1..20) {
+            if (commentsNeeded > 0) launch {
+                addDaewangconLog("💬 댓글 작성 시작 (${commentsNeeded}개)")
+                for (i in 1..commentsNeeded) {
                     currentCoroutineContext().ensureActive()
                     if (i > 1 && (i - 1) % DAEWANGCON_COMMENT_BATCH_SIZE == 0 && timing.daewangconCommentBatchDelayMillis > 0L) {
                         addDaewangconLog("⏳ ${formatDurationMillis(timing.daewangconCommentBatchDelayMillis)} 대기 중... (댓글 제한)")
                         delay(timing.daewangconCommentBatchDelayMillis)
                     }
-                    val postText = createDaewangconText(i)
+                    val postText = createDaewangconText(_daewangconCommentCount.value + 1)
                     val result = cleaner.writeComment("kingcon", "1400", postText)
                     if (result is WriteResult.Success) {
                         _daewangconCommentCount.update { it + 1 }
-                        recordDaewangconProgress()
-                        addDaewangconLog("✅ 댓글 작성 완료 ($i/20)")
+                        updateDaewangconProgress()
+                        addDaewangconLog("✅ 댓글 작성 완료 (${_daewangconCommentCount.value}/$requiredCommentCount)")
                     } else if (result is WriteResult.Failed) {
-                        addDaewangconLog("❌ 댓글 작성 실패 ($i/20): ${result.message}")
+                        addDaewangconLog("❌ 댓글 작성 실패 ($i/$commentsNeeded): ${result.message}")
                     }
-                    if (i < 20 && timing.daewangconCommentIntervalDelayMillis > 0L) delay(timing.daewangconCommentIntervalDelayMillis)
+                    if (i < commentsNeeded && timing.daewangconCommentIntervalDelayMillis > 0L) delay(timing.daewangconCommentIntervalDelayMillis)
                 }
             }
         }
 
-        val postCount = _daewangconPostCount.value
-        val commentCount = _daewangconCommentCount.value
-        if (postCount == 10 && commentCount == 20) {
-            addDaewangconLog("🎁 대왕콘 설정 요청 중...")
-            when (val setBigconResult = cleaner.setBigcon()) {
-                is WriteResult.Success -> {
-                    addDaewangconLog("🎉 대왕콘 작업 완료! 글 10개, 댓글 20개 작성")
-                    _isDaewangconCompleted.value = true
-                    notifier.notify("대왕콘 작업 완료", "글 10개, 댓글 20개 작성")
-                }
-                is WriteResult.Failed -> {
-                    val message = "대왕콘 설정 요청에 실패했습니다: ${setBigconResult.message}"
-                    _daewangconErrorMessage.value = message
-                    addDaewangconLog("❌ $message")
-                }
-            }
-        } else {
-            val message = "일부 작성에 실패했습니다. (글 $postCount/10, 댓글 $commentCount/20)"
+        addDaewangconLog("🔎 디시 서버에서 작성 결과 최종 확인 중...")
+        val finalProgress = cleaner.getDaewangconProgress() ?: run {
+            val message = "작성 결과를 확인하지 못해 대왕콘 설정 요청을 보내지 않았습니다."
             _daewangconErrorMessage.value = message
             addDaewangconLog("❌ $message")
+            return
+        }
+        requiredPostCount = finalProgress.requiredPostCount
+        requiredCommentCount = finalProgress.requiredCommentCount
+        _daewangconPostCount.value = finalProgress.postCount
+        _daewangconCommentCount.value = finalProgress.commentCount
+        updateDaewangconProgress()
+        if (!finalProgress.requirementsMet) {
+            val message = "일부 작성이 서버 진행도에 반영되지 않았습니다. " +
+                    "(글 ${finalProgress.postCount}/${finalProgress.requiredPostCount}, " +
+                    "댓글 ${finalProgress.commentCount}/${finalProgress.requiredCommentCount})"
+            _daewangconErrorMessage.value = message
+            addDaewangconLog("❌ $message")
+            return
+        }
+
+        addDaewangconLog("🎁 대왕콘 설정 요청 중...")
+        when (val setBigconResult = cleaner.setBigcon()) {
+            is WriteResult.Success -> {
+                _daewangconProgress.value = 1f
+                addDaewangconLog("🎉 대왕콘 작업 완료! 서버 기준 작성 조건을 충족했습니다.")
+                _isDaewangconCompleted.value = true
+                notifier.notify("대왕콘 작업 완료", "서버 기준 글/댓글 조건 충족 후 대왕콘 설정 완료")
+            }
+            is WriteResult.Failed -> {
+                val message = "대왕콘 설정 요청에 실패했습니다: ${setBigconResult.message}"
+                _daewangconErrorMessage.value = message
+                addDaewangconLog("❌ $message")
+            }
         }
     }
 }

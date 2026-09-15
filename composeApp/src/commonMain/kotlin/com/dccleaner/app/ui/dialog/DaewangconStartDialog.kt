@@ -14,7 +14,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -32,7 +31,7 @@ fun DaewangconStartDialog(
             Icon(
                 Icons.Default.Star,
                 contentDescription = "대왕콘",
-                tint = Color(0xFFFFD700),
+                tint = uiColors.primary,
                 modifier = Modifier.size(32.dp)
             )
         },
@@ -46,10 +45,10 @@ fun DaewangconStartDialog(
         confirmButton = {
             Button(
                 onClick = onStart,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
+                colors = ButtonDefaults.buttonColors(containerColor = uiColors.primary),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("시작", color = Color(0xFF191300), fontWeight = FontWeight.Bold)
+                Text("시작", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

@@ -28,7 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -81,7 +80,7 @@ fun UserInfoCard(
                     Icon(
                         Icons.AutoMirrored.Filled.ExitToApp,
                         contentDescription = "로그아웃",
-                        tint = Color.Red
+                        tint = uiColors.danger
                     )
                 }
             }

@@ -44,7 +44,7 @@ fun InterruptedDeleteTasksCard(
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Warning, null, tint = uiColors.warning)
+                Icon(Icons.Default.Warning, null, tint = uiColors.warningText)
                 Text(
                     "중단된 삭제 작업",
                     modifier = Modifier.padding(start = 8.dp),

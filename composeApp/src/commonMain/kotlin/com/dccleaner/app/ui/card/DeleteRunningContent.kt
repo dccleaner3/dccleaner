@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.model.UiColors
@@ -90,7 +89,8 @@ fun DeleteRunningContent(
                 onClick = onStop,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
+                    containerColor = uiColors.warning,
+                    contentColor = uiColors.onWarning
                 )
             ) {
                 Text("삭제 작업 중단")

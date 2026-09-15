@@ -16,6 +16,7 @@ class DcCleanerNotifier(
 ) {
     companion object {
         const val EXTRA_RESUME_TASK_ID = "resume_task_id"
+        private const val COMPLETION_CHANNEL_ID = "DCCLEANER_COMPLETION_CHANNEL"
         private const val INTERRUPTION_CHANNEL_ID = "DCCLEANER_INTERRUPTION_CHANNEL"
         private const val INTERRUPTION_NOTIFICATION_BASE_ID = 10_000
     }
@@ -34,6 +35,16 @@ class DcCleanerNotifier(
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.createNotificationChannel(channel)
+
+        val completionChannel = NotificationChannel(
+            COMPLETION_CHANNEL_ID,
+            "작업 완료 알림",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "삭제, 대왕콘, 방명록 작업 완료 및 결과 알림"
+            enableVibration(true)
+        }
+        notificationManager.createNotificationChannel(completionChannel)
 
         val captchaChannel = NotificationChannel(
             DcCleanerService.CAPTCHA_CHANNEL_ID,
@@ -147,6 +158,30 @@ class DcCleanerNotifier(
             .build()
     }
 
+    private fun createCompletionNotification(contentText: String): Notification {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("DC 클리너")
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+    }
+
     fun updateNotification(contentText: String) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -176,7 +211,7 @@ class DcCleanerNotifier(
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(
             DcCleanerService.NOTIFICATION_ID,
-            createServiceNotification("DC 클리너", contentText, ongoing = false)
+            createCompletionNotification(contentText)
         )
     }
 
@@ -185,11 +220,7 @@ class DcCleanerNotifier(
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(
             DcCleanerService.NOTIFICATION_ID,
-            createServiceNotification(
-                title = "DC 클리너",
-                contentText = "대왕콘 얻기 완료",
-                ongoing = false
-            )
+            createCompletionNotification("대왕콘 얻기 완료")
         )
     }
 
@@ -198,11 +229,7 @@ class DcCleanerNotifier(
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(
             DcCleanerService.NOTIFICATION_ID,
-            createServiceNotification(
-                title = "DC 클리너",
-                contentText = "대왕콘 얻기 실패",
-                ongoing = false
-            )
+            createCompletionNotification("대왕콘 얻기 실패")
         )
     }
 
@@ -211,10 +238,8 @@ class DcCleanerNotifier(
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(
             DcCleanerService.NOTIFICATION_ID,
-            createServiceNotification(
-                title = "DC 클리너",
-                contentText = "방명록 전송 완료: 성공 ${successCount}명, 실패 ${failCount}명",
-                ongoing = false
+            createCompletionNotification(
+                "방명록 전송 완료: 성공 ${successCount}명, 실패 ${failCount}명"
             )
         )
     }

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DCCleaner 음악 연동</string>
+    <string name="notification_listener_name">DCCleaner 재생 곡 연동</string>
+    <string name="music_bridge_description">현재 재생 중인 곡 정보만 DCCleaner 본앱에 전달합니다. 디시 로그인 정보와 글 내용에는 접근하지 않습니다.</string>
+    <string name="supported_platforms_label">지원 플랫폼</string>
+    <string name="status_ready">연동 준비 완료</string>
+    <string name="status_permission_required">알림 접근 권한 필요</string>
+    <string name="status_ready_description">이제 DCCleaner에서 현재 재생 곡 첨부를 사용할 수 있습니다.</string>
+    <string name="status_permission_description">Android 설정에서 ‘DCCleaner 재생 곡 연동’을 허용해 주세요.</string>
+    <string name="open_notification_settings">알림 접근 설정 열기</string>
+    <string name="configure_permission">권한 설정하기</string>
+</resources>

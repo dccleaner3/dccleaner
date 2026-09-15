@@ -9,6 +9,13 @@ val desktopPackageName = "DCCleaner Mobile"
 val desktopPackageVersion = providers.gradleProperty("dccleaner.version").get()
 val generatedDesktopBuildConfigDir = layout.buildDirectory.dir("generated/source/desktopBuildConfig/kotlin")
 val desktopIconsDir = project.layout.projectDirectory.dir("src/desktopMain/resources/icons")
+val localAdJsonFile = rootProject.file("docs/ad.json")
+val localAdJson = if (localAdJsonFile.isFile) localAdJsonFile.readText() else ""
+val localAdJsonBuildConfigValue = localAdJson
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace("\r", "\\r")
+    .replace("\n", "\\n")
 val windowsIconFile = desktopIconsDir.file("app.ico").asFile
 val macIconFile = desktopIconsDir.file("app.icns").asFile
 
@@ -44,6 +51,10 @@ kotlin {
         }
         val androidMain by getting {
             dependsOn(jvmMain)
+            dependencies {
+                implementation(libs.androidx.activity.compose)
+                implementation(project(":musicContract"))
+            }
         }
         val commonTest by getting {
             dependencies {
@@ -93,6 +104,17 @@ android {
 
     defaultConfig {
         minSdk = 26
+        buildConfigField("String", "LOCAL_AD_JSON", "\"\"")
+    }
+
+    buildTypes {
+        getByName("debug") {
+            buildConfigField("String", "LOCAL_AD_JSON", "\"$localAdJsonBuildConfigValue\"")
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 }
 

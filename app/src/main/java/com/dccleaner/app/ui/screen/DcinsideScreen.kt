@@ -15,7 +15,10 @@ import com.dccleaner.app.storage.removeSavedAccount
 import com.dccleaner.app.storage.removeSavedTwoCaptchaKey
 import com.dccleaner.app.storage.saveTwoCaptchaKey
 import com.dccleaner.app.storage.DeleteTaskStore
+import com.dccleaner.app.storage.GuestbookSentUserCache
 import com.dccleaner.app.storage.getSavedRecordGuestbookLog
+import com.dccleaner.app.storage.getSavedDeveloperMode
+import com.dccleaner.app.storage.saveDeveloperMode
 import com.dccleaner.app.storage.saveRecordGuestbookLog
 import com.dccleaner.app.util.LogManager
 import com.dccleaner.app.update.ReleaseVersionChecker
@@ -23,6 +26,7 @@ import com.dccleaner.app.ui.card.*
 import com.dccleaner.app.ui.cleaner.DcCleanerTabContent
 import com.dccleaner.app.ui.dialog.*
 import com.dccleaner.app.ui.guestbook.GuestbookTabContent
+import com.dccleaner.app.ui.guestbook.GuestbookCacheFilterResult
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -48,6 +52,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.res.painterResource
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
+import com.dccleaner.app.runtime.previewDeletion
 import android.app.Activity
 import android.content.Intent
 import android.util.Log
@@ -58,6 +66,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,6 +89,7 @@ fun DcinsideScreen(
     }
     val serviceManager = remember(appContext) { ServiceManager(appContext) }
     val deleteTaskStore = remember(appContext) { DeleteTaskStore(appContext) }
+    val guestbookSentUserCache = remember(appContext) { GuestbookSentUserCache(appContext) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollState = rememberScrollState()
     val restoreScrollTopPadding = with(LocalDensity.current) { 72.dp.roundToPx() }
@@ -109,12 +120,14 @@ fun DcinsideScreen(
     var savedAccounts by remember { mutableStateOf<List<SavedAccount>>(emptyList()) }
     var interruptedTasks by remember { mutableStateOf<List<DeleteTaskProgress>>(emptyList()) }
     var isLoggingIn by remember { mutableStateOf(false) } // 로그인 중 상태
+    var sessionExpired by remember { mutableStateOf(false) }
 
 
     var postingGallList by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var commentGallList by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var selectedGallList by remember { mutableStateOf<List<String>>(emptyList()) }
     var userDataRefreshRequest by remember { mutableIntStateOf(0) }
+    var sessionCheckRequest by remember { mutableIntStateOf(0) }
 
 
     var twocaptchaKey by remember { mutableStateOf("") }
@@ -127,8 +140,10 @@ fun DcinsideScreen(
     // 삭제 조건 설정
     var minRecommendToKeep by remember { mutableStateOf("1") }
     var minCommentToKeep by remember { mutableStateOf("1") }
+    var minViewToKeep by remember { mutableStateOf("1") }
     var recommendFilterEnabled by remember { mutableStateOf(false) }
     var commentFilterEnabled by remember { mutableStateOf(false) }
+    var viewFilterEnabled by remember { mutableStateOf(false) }
     var postContentFilterEnabled by remember { mutableStateOf(false) }
     var postContentRegex by remember { mutableStateOf("") }
     var myPostFilterEnabled by remember { mutableStateOf(false) }
@@ -137,6 +152,7 @@ fun DcinsideScreen(
     var commentContentRegex by remember { mutableStateOf("") }
     var dateFilterEnabled by remember { mutableStateOf(false) }
     var deleteNewestFirst by remember { mutableStateOf(false) }
+    var deleteQuestionPosts by remember { mutableStateOf(false) }
     var minPostAgeDaysToDelete by remember { mutableStateOf("5") }
     var recordGuestbookLog by remember(appContext) {
         mutableStateOf(getSavedRecordGuestbookLog(appContext))
@@ -144,6 +160,10 @@ fun DcinsideScreen(
 
 
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var isInspectingDeletion by remember { mutableStateOf(false) }
+    var deletionInspectionMessage by remember { mutableStateOf("") }
+    var deletionPreview by remember { mutableStateOf<DeletionPreview?>(null) }
+    var deletionInspectionJob by remember { mutableStateOf<Job?>(null) }
     var showDeleteProgressDialog by remember { mutableStateOf(false) }
     var showStopDeleteDialog by remember { mutableStateOf(false) }
     var isDeleting by remember {
@@ -179,6 +199,9 @@ fun DcinsideScreen(
 
     // 탭 관련 상태
     var selectedTab by remember { mutableStateOf(0) }
+    var developerMode by remember(appContext) {
+        mutableStateOf(getSavedDeveloperMode(appContext))
+    }
 
     // 대왕콘 관련 상태
     var daewangconGalleryId by remember { mutableStateOf("") }
@@ -189,6 +212,7 @@ fun DcinsideScreen(
     var showDaewangconDialog by remember { mutableStateOf(false) }
     var showDaewangconProgressDialog by remember { mutableStateOf(false) }
     var showStopDaewangconDialog by remember { mutableStateOf(false) }
+    var daewangconServerProgress by remember { mutableStateOf<DaewangconProgress?>(null) }
 
     // 버전 체크 관련 상태
     var latestVersion by remember { mutableStateOf<String?>(null) }
@@ -221,6 +245,21 @@ fun DcinsideScreen(
     val daewangconPostCount by serviceManager.daewangconPostCount.collectAsStateWithLifecycle()
     val daewangconCommentCount by serviceManager.daewangconCommentCount.collectAsStateWithLifecycle()
     val serviceGuestbookIsSending by serviceManager.isGuestbookSending.collectAsStateWithLifecycle()
+    val commentCleanerRunning by serviceManager.isCommentCleanerRunning.collectAsStateWithLifecycle()
+
+    LaunchedEffect(loginInfo != null, commentCleanerRunning) {
+        if (loginInfo != null && !commentCleanerRunning) {
+            val settings = getSavedCommentCleanerSettings(appContext)
+            if (settings.enabled && settings.keywords.isNotEmpty()) {
+                serviceManager.startCommentCleaner(
+                    cleaner,
+                    settings.keywords,
+                    settings.intervalSeconds,
+                    settings.monitorMinutes
+                )
+            }
+        }
+    }
     val serviceGuestbookProgress by serviceManager.guestbookProgress.collectAsStateWithLifecycle()
     val serviceGuestbookProgressDone = serviceGuestbookProgress.done
     val serviceGuestbookProgressTotal = serviceGuestbookProgress.total
@@ -233,13 +272,58 @@ fun DcinsideScreen(
     var guestbookShowConfirmDialog by remember { mutableStateOf(false) }
     var guestbookShowResultDialog by remember { mutableStateOf(false) }
     var showGuestbookProgressDialog by remember { mutableStateOf(false) }
+    var guestbookCachedUserCount by remember { mutableIntStateOf(0) }
 
     var deleteTaskWasRunning by remember { mutableStateOf(false) }
     var daewangconTaskWasRunning by remember { mutableStateOf(false) }
     var guestbookTaskWasRunning by remember { mutableStateOf(false) }
 
+    LaunchedEffect(loginInfo, serviceGuestbookIsSending) {
+        if (!serviceGuestbookIsSending) {
+            guestbookCachedUserCount = if (loginInfo == null) {
+                0
+            } else {
+                guestbookSentUserCache.count(cleaner.getUserId())
+            }
+        }
+    }
+
     fun requestUserDataRefresh() {
         userDataRefreshRequest++
+    }
+
+    fun handleExpiredGallListSession() {
+        val expiredLoginId = cleaner.getUserId().ifBlank { id }
+        val reloginPassword = savedAccounts
+            .firstOrNull { it.id.equals(expiredLoginId, ignoreCase = true) }
+            ?.password
+            ?: pw
+        cleaner.clearSession()
+        serviceManager.stopCommentCleaner()
+        serviceManager.clearLogs()
+        loginInfo = null
+        daewangconServerProgress = null
+        id = expiredLoginId
+        pw = reloginPassword
+        sessionExpired = true
+        postingGallList = emptyMap()
+        commentGallList = emptyMap()
+        selectedGallList = emptyList()
+        interruptedTasks = emptyList()
+        deleteLog = emptyList()
+        showDeleteProgressDialog = false
+        showDaewangconProgressDialog = false
+        isTwocaptchaValid = null
+        isLoggingIn = false
+    }
+
+    LaunchedEffect(sessionCheckRequest) {
+        if (sessionCheckRequest == 0 || loginInfo == null || isServiceDeleting) return@LaunchedEffect
+        when (cleaner.checkLoginSession()) {
+            false -> handleExpiredGallListSession()
+            true -> sessionExpired = false
+            null -> Unit
+        }
     }
 
     LaunchedEffect(userDataRefreshRequest) {
@@ -248,6 +332,7 @@ fun DcinsideScreen(
         val uiLoginId = cleaner.getUserId()
         if (uiLoginId.isBlank()) {
             loginInfo = null
+            daewangconServerProgress = null
             id = serviceTaskLoginId
             postingGallList = emptyMap()
             commentGallList = emptyMap()
@@ -255,15 +340,26 @@ fun DcinsideScreen(
         } else {
             try {
                 loginInfo = cleaner.getUserInfo()
+                daewangconServerProgress = cleaner.getDaewangconProgress()
 
                 val postingGallResult = cleaner.getGallList("posting")
-                if (postingGallResult is GallListResult.Success) {
-                    postingGallList = postingGallResult.galleries
+                when (postingGallResult) {
+                    GallListResult.SessionExpired -> {
+                        handleExpiredGallListSession()
+                        return@LaunchedEffect
+                    }
+                    is GallListResult.Success -> postingGallList = postingGallResult.galleries
+                    GallListResult.Blocked -> Unit
                 }
 
                 val commentGallResult = cleaner.getGallList("comment")
-                if (commentGallResult is GallListResult.Success) {
-                    commentGallList = commentGallResult.galleries
+                when (commentGallResult) {
+                    GallListResult.SessionExpired -> {
+                        handleExpiredGallListSession()
+                        return@LaunchedEffect
+                    }
+                    is GallListResult.Success -> commentGallList = commentGallResult.galleries
+                    GallListResult.Blocked -> Unit
                 }
 
                 val refreshedGallList = if (deleteType == "posting") {
@@ -346,7 +442,10 @@ fun DcinsideScreen(
         val lifecycle = lifecycleOwner.lifecycle
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> serviceManager.setUiObservationEnabled(true)
+                Lifecycle.Event.ON_START -> {
+                    serviceManager.setUiObservationEnabled(true)
+                    sessionCheckRequest++
+                }
                 Lifecycle.Event.ON_STOP -> serviceManager.setUiObservationEnabled(false)
                 else -> Unit
             }
@@ -355,6 +454,9 @@ fun DcinsideScreen(
         serviceManager.setUiObservationEnabled(
             lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         )
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            sessionCheckRequest++
+        }
         serviceManager.bindService()
         // 저장된 계정 정보 로드
         savedAccounts = getSavedAccounts(context)
@@ -480,7 +582,6 @@ fun DcinsideScreen(
 
 
     val primaryColor = uiColors.primary
-    val secondaryColor = uiColors.secondary
     val backgroundColor = uiColors.background
     val cardColor = uiColors.card
     val deleteUiActive = isServiceDeleting || isDeleting
@@ -497,9 +598,11 @@ fun DcinsideScreen(
             id = id,
             pw = pw,
             loginInfo = loginInfo,
+            daewangconServerProgress = daewangconServerProgress,
             saveLogin = saveLogin,
             savedAccounts = savedAccounts,
             isLoggingIn = isLoggingIn,
+            sessionExpired = sessionExpired,
             deleteUiActive = deleteUiActive,
             runningLoginId = serviceTaskLoginId,
             displayedGallery = displayedGallery,
@@ -513,6 +616,8 @@ fun DcinsideScreen(
             focusedTaskId = resumeTaskId,
             restoringMessage = restoringMessage,
             selectedTab = selectedTab,
+            developerMode = developerMode,
+            commentCleanerRunning = commentCleanerRunning,
             postingGallList = postingGallList,
             commentGallList = commentGallList,
             deleteType = deleteType,
@@ -522,8 +627,10 @@ fun DcinsideScreen(
             isCheckingTwocaptcha = isCheckingTwocaptcha,
             minRecommendToKeep = minRecommendToKeep,
             minCommentToKeep = minCommentToKeep,
+            minViewToKeep = minViewToKeep,
             recommendFilterEnabled = recommendFilterEnabled,
             commentFilterEnabled = commentFilterEnabled,
+            viewFilterEnabled = viewFilterEnabled,
             postContentFilterEnabled = postContentFilterEnabled,
             postContentRegex = postContentRegex,
             myPostFilterEnabled = myPostFilterEnabled,
@@ -532,6 +639,7 @@ fun DcinsideScreen(
             commentContentRegex = commentContentRegex,
             dateFilterEnabled = dateFilterEnabled,
             deleteNewestFirst = deleteNewestFirst,
+            deleteQuestionPosts = deleteQuestionPosts,
             minPostAgeDaysToDelete = minPostAgeDaysToDelete,
             recordGuestbookLog = recordGuestbookLog,
             latestVersion = latestVersion,
@@ -540,14 +648,19 @@ fun DcinsideScreen(
             showErrorDialog = showErrorDialog,
             errorMessage = errorMessage,
             deleteTaskToRemove = deleteTaskToRemove,
+            isInspectingDeletion = isInspectingDeletion,
+            deletionInspectionMessage = deletionInspectionMessage,
+            deletionPreview = deletionPreview,
             showDeleteConfirmDialog = showDeleteConfirmDialog,
             activeFilters = buildList {
                 if (deleteType == "posting" && recommendFilterEnabled) add("추천 ${minRecommendToKeep.ifBlank { "1" }}개 이상 보존")
                 if (deleteType == "posting" && commentFilterEnabled) add("댓글 ${minCommentToKeep.ifBlank { "1" }}개 이상 보존")
+                if (deleteType == "posting" && viewFilterEnabled) add("조회 ${minViewToKeep.ifBlank { "1" }}회 이상 보존")
                 if (deleteType == "posting" && postContentFilterEnabled) add("글 정규식")
                 if (deleteNewestFirst) {
                     add(if (deleteType == "posting") "최근 글부터 삭제" else "최근 댓글부터 삭제")
                 }
+                if (deleteType == "posting" && deleteQuestionPosts) add("질문글도 삭제")
                 if (deleteType == "comment" && myPostFilterEnabled) add("내 글 필터")
                 if (deleteType == "comment" && dcconOnlyFilterEnabled) add("디시콘 전용")
                 if (deleteType == "comment" && commentContentFilterEnabled) add("댓글 정규식")
@@ -584,7 +697,9 @@ fun DcinsideScreen(
             guestbookProgressDone = serviceGuestbookProgressDone,
             guestbookProgressTotal = serviceGuestbookProgressTotal,
             guestbookSuccessCount = serviceGuestbookSuccessCount,
-            guestbookFailCount = serviceGuestbookFailCount
+            guestbookFailCount = serviceGuestbookFailCount,
+            guestbookCacheEnabled = true,
+            guestbookCachedUserCount = guestbookCachedUserCount
         ),
         actions = DccleanerScreenActions(
             onDarkThemeChange = onDarkThemeChange,
@@ -602,6 +717,7 @@ fun DcinsideScreen(
             onLoginClick = {
                 coroutine.launch {
                     isLoggingIn = true
+                    daewangconServerProgress = null
                     val success = cleaner.login(id, pw)
                     if (!success) {
                         Log.w("DcinsideScreen", "로그인 실패 감지")
@@ -623,9 +739,19 @@ fun DcinsideScreen(
                         }
                     }
                     loginInfo = cleaner.getUserInfo()
+                    sessionExpired = false
+                    daewangconServerProgress = cleaner.getDaewangconProgress()
                     interruptedTasks = deleteTaskStore.getForLogin(cleaner.getUserId())
                     val posting = cleaner.getGallList("posting")
+                    if (posting is GallListResult.SessionExpired) {
+                        handleExpiredGallListSession()
+                        return@launch
+                    }
                     val comment = cleaner.getGallList("comment")
+                    if (comment is GallListResult.SessionExpired) {
+                        handleExpiredGallListSession()
+                        return@launch
+                    }
                     postingGallList = (posting as? GallListResult.Success)?.galleries ?: emptyMap()
                     commentGallList = (comment as? GallListResult.Success)?.galleries ?: emptyMap()
                     selectedGallList = if (deleteType == "posting") postingGallList.keys.toList() else commentGallList.keys.toList()
@@ -669,6 +795,15 @@ fun DcinsideScreen(
             },
             onDeleteTask = { deleteTaskToRemove = it },
             onTabChange = { selectedTab = it },
+            onDeveloperModeToggle = {
+                developerMode = !developerMode
+                saveDeveloperMode(appContext, developerMode)
+            },
+            onRequestWriteCookies = cleaner::getWebViewSessionCookies,
+            onStartCommentCleaner = { keywords, intervalSeconds, monitorMinutes ->
+                serviceManager.startCommentCleaner(cleaner, keywords, intervalSeconds, monitorMinutes)
+            },
+            onStopCommentCleaner = serviceManager::stopCommentCleaner,
             onOpenManual = { tab ->
                 val manualUrl = if (tab == 0) "https://dccleaner3.github.io/dccleaner/cleaner" else "https://dccleaner3.github.io/dccleaner/guestbook"
                 context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(manualUrl)))
@@ -688,20 +823,82 @@ fun DcinsideScreen(
             },
             onTwocaptchaValidChange = { isTwocaptchaValid = it },
             onIsCheckingTwocaptchaChange = { isCheckingTwocaptcha = it },
-            onShowDeleteDialog = {
+            onShowDeleteDialog = showDeleteDialog@{
                 val currentGallList = if (deleteType == "posting") postingGallList else commentGallList
                 if (!DeleteTaskStartValidator.hasCompleteGalleryMap(selectedGallList, currentGallList)) {
                     errorMessage = "갤러리 목록을 불러온 뒤 다시 시도해 주세요."
                     showErrorDialog = true
-                } else {
-                    showDeleteConfirmDialog = true
+                    return@showDeleteDialog
+                }
+                deletionPreview = null
+                deletionInspectionMessage = "로그인 상태 확인 중"
+                deletionInspectionJob = coroutine.launch {
+                    when (cleaner.checkLoginSession()) {
+                        false -> {
+                            handleExpiredGallListSession()
+                        }
+                        null -> {
+                            errorMessage = "로그인 상태를 확인하지 못했습니다.\n잠시 후 다시 시도해 주세요."
+                            showErrorDialog = true
+                        }
+                        true -> {
+                            try {
+                                showDeleteConfirmDialog = true
+                                isInspectingDeletion = true
+                                deletionInspectionMessage = "미리보기를 불러오는 중..."
+                                val result = previewDeletion(
+                                    cleaner = cleaner,
+                                    task = DeleteTaskProgress(
+                                        loginId = cleaner.getUserId(),
+                                        deleteType = deleteType,
+                                        selectedGalleries = selectedGallList,
+                                        galleryMap = DeleteTaskStartValidator.selectedGalleryMap(selectedGallList, currentGallList),
+                                        recommendFilterEnabled = recommendFilterEnabled,
+                                        commentFilterEnabled = commentFilterEnabled,
+                                        viewFilterEnabled = viewFilterEnabled,
+                                        postContentFilterEnabled = postContentFilterEnabled,
+                                        commentContentFilterEnabled = commentContentFilterEnabled,
+                                        dateFilterEnabled = dateFilterEnabled,
+                                        deleteNewestFirst = deleteNewestFirst,
+                                        deleteQuestionPosts = deleteQuestionPosts,
+                                        minRecommendToKeep = if (recommendFilterEnabled) minRecommendToKeep.toIntOrNull() ?: 1 else -1,
+                                        minCommentToKeep = if (commentFilterEnabled) minCommentToKeep.toIntOrNull() ?: 1 else -1,
+                                        minViewToKeep = if (viewFilterEnabled) minViewToKeep.toIntOrNull() ?: 1 else -1,
+                                        myPostFilterEnabled = myPostFilterEnabled,
+                                        dcconOnlyFilterEnabled = dcconOnlyFilterEnabled,
+                                        postContentRegex = if (postContentFilterEnabled) postContentRegex else "",
+                                        commentRegexFilter = if (commentContentFilterEnabled) commentContentRegex else "",
+                                        minPostAgeDaysToDelete = if (dateFilterEnabled) minPostAgeDaysToDelete.toIntOrNull() ?: 5 else -1
+                                    ),
+                                    onUpdate = { deletionPreview = it }
+                                )
+                                deletionPreview = result
+                                isInspectingDeletion = false
+                                if (result.items.isEmpty()) {
+                                    deletionInspectionMessage = "첫 페이지에 삭제 예정 항목이 없습니다."
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: IllegalArgumentException) {
+                                isInspectingDeletion = false
+                                showDeleteConfirmDialog = false
+                                errorMessage = e.message ?: "삭제 조건을 확인해 주세요."
+                                showErrorDialog = true
+                            } catch (e: Exception) {
+                                isInspectingDeletion = false
+                                deletionInspectionMessage = "미리보기를 불러오지 못했습니다. 바로 삭제할 수 있습니다."
+                            }
+                        }
+                    }
                 }
             },
             onSelectedGallListChange = { selectedGallList = it },
             onMinRecommendToKeepChange = { minRecommendToKeep = it },
             onMinCommentToKeepChange = { minCommentToKeep = it },
+            onMinViewToKeepChange = { minViewToKeep = it },
             onRecommendFilterEnabledChange = { recommendFilterEnabled = it },
             onCommentFilterEnabledChange = { commentFilterEnabled = it },
+            onViewFilterEnabledChange = { viewFilterEnabled = it },
             onPostContentFilterEnabledChange = { postContentFilterEnabled = it },
             onPostContentRegexChange = { postContentRegex = it },
             onMyPostFilterEnabledChange = { myPostFilterEnabled = it },
@@ -710,6 +907,7 @@ fun DcinsideScreen(
             onCommentContentRegexChange = { commentContentRegex = it },
             onDateFilterEnabledChange = { dateFilterEnabled = it },
             onDeleteNewestFirstChange = { deleteNewestFirst = it },
+            onDeleteQuestionPostsChange = { deleteQuestionPosts = it },
             onMinPostAgeDaysToDeleteChange = { minPostAgeDaysToDelete = it },
             onRecordGuestbookLogChange = { enabled ->
                 recordGuestbookLog = enabled
@@ -736,53 +934,65 @@ fun DcinsideScreen(
                 deleteTaskToRemove = null
             },
             onDismissDeleteTaskRecord = { deleteTaskToRemove = null },
-            onConfirmStartDeletion = confirm@{
-                val currentGallList = if (deleteType == "posting") postingGallList else commentGallList
-                if (!DeleteTaskStartValidator.hasCompleteGalleryMap(selectedGallList, currentGallList)) {
-                    showDeleteConfirmDialog = false
-                    errorMessage = "갤러리 목록을 불러온 뒤 다시 시도해 주세요."
-                    showErrorDialog = true
-                    return@confirm
-                }
-                val selectedGalleryMap = DeleteTaskStartValidator.selectedGalleryMap(selectedGallList, currentGallList)
+            onConfirmStartDeletion = {
                 showDeleteConfirmDialog = false
-                restoringTaskId = null
-                activeResumeTaskId = null
-                onResumeTaskConsumed()
-                isDeleting = true
-                isCompleted = false
-                showDeleteProgressDialog = true
-                deleteLog = emptyList()
-                currentProgress = 0f
-                deletedPosts = 0
-                totalPosts = 0
-                val started = serviceManager.startDeletion(
-                    cleaner = cleaner,
-                    selectedGalleries = selectedGallList,
-                    deleteType = deleteType,
-                    galleryMap = selectedGalleryMap,
-                    twoCaptchaApiKey = twocaptchaKey,
-                    recommendFilterEnabled = recommendFilterEnabled,
-                    commentFilterEnabled = commentFilterEnabled,
-                    postContentFilterEnabled = postContentFilterEnabled,
-                    commentContentFilterEnabled = commentContentFilterEnabled,
-                    dateFilterEnabled = dateFilterEnabled,
-                    deleteNewestFirst = deleteNewestFirst,
-                    minRecommendToKeep = if (recommendFilterEnabled) minRecommendToKeep.toIntOrNull() ?: 1 else -1,
-                    minCommentToKeep = if (commentFilterEnabled) minCommentToKeep.toIntOrNull() ?: 1 else -1,
-                    myPostFilterEnabled = myPostFilterEnabled,
-                    dcconOnlyFilterEnabled = dcconOnlyFilterEnabled,
-                    postContentRegex = if (postContentFilterEnabled) postContentRegex else "",
-                    commentRegexFilter = if (commentContentFilterEnabled) commentContentRegex else "",
-                    minPostAgeDaysToDelete = if (dateFilterEnabled) minPostAgeDaysToDelete.toIntOrNull() ?: 5 else -1,
-                    recordGuestbookLog = recordGuestbookLog
-                )
-                if (!started) {
-                    isDeleting = false
-                    showDeleteProgressDialog = false
+                coroutine.launch startDeletion@{
+                    deletionInspectionJob?.cancelAndJoin()
+                    deletionInspectionJob = null
+                    isInspectingDeletion = false
+                    val currentGallList = if (deleteType == "posting") postingGallList else commentGallList
+                    if (!DeleteTaskStartValidator.hasCompleteGalleryMap(selectedGallList, currentGallList)) {
+                        errorMessage = "갤러리 목록을 불러온 뒤 다시 시도해 주세요."
+                        showErrorDialog = true
+                        return@startDeletion
+                    }
+                    val selectedGalleryMap = DeleteTaskStartValidator.selectedGalleryMap(selectedGallList, currentGallList)
+                    restoringTaskId = null
+                    activeResumeTaskId = null
+                    onResumeTaskConsumed()
+                    isDeleting = true
+                    isCompleted = false
+                    showDeleteProgressDialog = true
+                    deleteLog = emptyList()
+                    currentProgress = 0f
+                    deletedPosts = 0
+                    totalPosts = 0
+                    val started = serviceManager.startDeletion(
+                        cleaner = cleaner,
+                        selectedGalleries = selectedGallList,
+                        deleteType = deleteType,
+                        galleryMap = selectedGalleryMap,
+                        twoCaptchaApiKey = twocaptchaKey,
+                        recommendFilterEnabled = recommendFilterEnabled,
+                        commentFilterEnabled = commentFilterEnabled,
+                        viewFilterEnabled = viewFilterEnabled,
+                        postContentFilterEnabled = postContentFilterEnabled,
+                        commentContentFilterEnabled = commentContentFilterEnabled,
+                        dateFilterEnabled = dateFilterEnabled,
+                        deleteNewestFirst = deleteNewestFirst,
+                        deleteQuestionPosts = deleteQuestionPosts,
+                        minRecommendToKeep = if (recommendFilterEnabled) minRecommendToKeep.toIntOrNull() ?: 1 else -1,
+                        minCommentToKeep = if (commentFilterEnabled) minCommentToKeep.toIntOrNull() ?: 1 else -1,
+                        minViewToKeep = if (viewFilterEnabled) minViewToKeep.toIntOrNull() ?: 1 else -1,
+                        myPostFilterEnabled = myPostFilterEnabled,
+                        dcconOnlyFilterEnabled = dcconOnlyFilterEnabled,
+                        postContentRegex = if (postContentFilterEnabled) postContentRegex else "",
+                        commentRegexFilter = if (commentContentFilterEnabled) commentContentRegex else "",
+                        minPostAgeDaysToDelete = if (dateFilterEnabled) minPostAgeDaysToDelete.toIntOrNull() ?: 5 else -1,
+                        recordGuestbookLog = recordGuestbookLog
+                    )
+                    if (!started) {
+                        isDeleting = false
+                        showDeleteProgressDialog = false
+                    }
                 }
             },
-            onDismissStartDeletion = { showDeleteConfirmDialog = false },
+            onDismissStartDeletion = {
+                deletionInspectionJob?.cancel()
+                deletionInspectionJob = null
+                isInspectingDeletion = false
+                showDeleteConfirmDialog = false
+            },
             onCloseDeleteProgress = {
                 showDeleteProgressDialog = false
                 restoringTaskId = null
@@ -863,6 +1073,21 @@ fun DcinsideScreen(
             onGuestbookProgressTotalChange = { },
             onGuestbookSuccessCountChange = { },
             onGuestbookFailCountChange = { },
+            onFilterGuestbookCachedUsers = { userIds ->
+                val cachedUserIds = guestbookSentUserCache.loadUserIds(cleaner.getUserId())
+                withContext(Dispatchers.Default) {
+                    val userIdsToSend = userIds.filterNot(cachedUserIds::contains)
+                    GuestbookCacheFilterResult(
+                        userIdsToSend = userIdsToSend,
+                        skippedCount = userIds.size - userIdsToSend.size
+                    )
+                }
+            },
+            onClearGuestbookCachedUsers = {
+                guestbookSentUserCache.clear(cleaner.getUserId()).also { cleared ->
+                    if (cleared) guestbookCachedUserCount = 0
+                }
+            },
             onResolveGuestbookUserList = { url -> GuestbookUserListFetcher.fetch(url) },
             onStartGuestbookSend = { ids, message ->
                 if (serviceManager.startGuestbook(cleaner, ids, message)) {

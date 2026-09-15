@@ -22,12 +22,6 @@ class DccleanerTaskController(
         scope = scope,
         timing = timing
     )
-    private val daewangconRunner = DaewangconRunner(
-        logSink = logSink,
-        notifier = notifier,
-        scope = scope,
-        timing = timing
-    )
 
     val isDeleting = engine.isDeleting
     val isCompleted = engine.isCompleted
@@ -44,19 +38,15 @@ class DccleanerTaskController(
     val errorMessage = engine.errorMessage
     val showCaptchaDialog = engine.showCaptchaDialog
     val captchaFlag = engine.captchaFlag
-    val isDaewangconRunning = daewangconRunner.isRunning
-    val isDaewangconCompleted = daewangconRunner.isCompleted
-    val daewangconErrorMessage = daewangconRunner.errorMessage
-    val daewangconProgress = daewangconRunner.progress
-    val daewangconLog = daewangconRunner.logs
-    val daewangconPostCount = daewangconRunner.postCount
-    val daewangconCommentCount = daewangconRunner.commentCount
+    val isDaewangconRunning = engine.isDaewangconRunning
+    val isDaewangconCompleted = engine.isDaewangconCompleted
+    val daewangconErrorMessage = engine.daewangconErrorMessage
+    val daewangconProgress = engine.daewangconProgress
+    val daewangconLog = engine.daewangconLog
+    val daewangconPostCount = engine.daewangconPostCount
+    val daewangconCommentCount = engine.daewangconCommentCount
 
-    fun setCleaner(cleaner: CleanerPort) {
-        engine.setCleaner(cleaner)
-        daewangconRunner.setCleaner(cleaner)
-    }
-
+    fun setCleaner(cleaner: CleanerPort) = engine.setCleaner(cleaner)
     fun clearError() = engine.clearError()
     fun clearLogs() = engine.clearLogs()
     fun getCurrentTaskLoginId(): String = engine.getCurrentTaskLoginId()
@@ -68,12 +58,15 @@ class DccleanerTaskController(
         twoCaptchaApiKey: String = "",
         recommendFilterEnabled: Boolean = false,
         commentFilterEnabled: Boolean = false,
+        viewFilterEnabled: Boolean = false,
         postContentFilterEnabled: Boolean = false,
         commentContentFilterEnabled: Boolean = false,
         dateFilterEnabled: Boolean = false,
         deleteNewestFirst: Boolean = false,
+        deleteQuestionPosts: Boolean = false,
         minRecommendToKeep: Int = -1,
         minCommentToKeep: Int = -1,
+        minViewToKeep: Int = -1,
         myPostFilterEnabled: Boolean = false,
         dcconOnlyFilterEnabled: Boolean = false,
         postContentRegex: String = "",
@@ -87,12 +80,15 @@ class DccleanerTaskController(
         twoCaptchaApiKey = twoCaptchaApiKey,
         recommendFilterEnabled = recommendFilterEnabled,
         commentFilterEnabled = commentFilterEnabled,
+        viewFilterEnabled = viewFilterEnabled,
         postContentFilterEnabled = postContentFilterEnabled,
         commentContentFilterEnabled = commentContentFilterEnabled,
         dateFilterEnabled = dateFilterEnabled,
         deleteNewestFirst = deleteNewestFirst,
+        deleteQuestionPosts = deleteQuestionPosts,
         minRecommendToKeep = minRecommendToKeep,
         minCommentToKeep = minCommentToKeep,
+        minViewToKeep = minViewToKeep,
         myPostFilterEnabled = myPostFilterEnabled,
         dcconOnlyFilterEnabled = dcconOnlyFilterEnabled,
         postContentRegex = postContentRegex,
@@ -110,18 +106,23 @@ class DccleanerTaskController(
     ) = engine.pauseDeletion(state, message, notify = notify)
     fun resolveCaptcha() = engine.resolveCaptcha()
 
-    @Suppress("UNUSED_PARAMETER")
     fun startDaewangcon(
         galleryId: String,
         postNo: String,
         postSubject: String,
         postContent: String,
         commentContent: String
-    ) = daewangconRunner.start()
+    ) = engine.startDaewangcon(
+        galleryId = galleryId,
+        postNo = postNo,
+        postSubject = postSubject,
+        postContent = postContent,
+        commentContent = commentContent
+    )
 
-    fun stopDaewangcon() = daewangconRunner.stop()
-    fun interruptDaewangcon(message: String) = daewangconRunner.interrupt(message)
-    fun acknowledgeDaewangconResult() = daewangconRunner.acknowledgeResult()
+    fun stopDaewangcon() = engine.stopDaewangcon()
+    fun interruptDaewangcon(message: String) = engine.interruptDaewangcon(message)
+    fun acknowledgeDaewangconResult() = engine.acknowledgeDaewangconResult()
 
     fun close() {
         if (engine.isDeleting.value) {
@@ -131,10 +132,9 @@ class DccleanerTaskController(
                 notify = true
             )
         }
-        if (daewangconRunner.isRunning.value) {
-            daewangconRunner.interrupt("앱 종료로 대왕콘 작업이 중단되었습니다.")
+        if (engine.isDaewangconRunning.value) {
+            engine.interruptDaewangcon("앱 종료로 대왕콘 작업이 중단되었습니다.")
         }
-        daewangconRunner.close()
         engine.close()
         scope.cancel()
     }

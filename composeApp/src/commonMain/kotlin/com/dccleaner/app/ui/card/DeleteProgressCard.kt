@@ -33,9 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dccleaner.app.ui.dialog.ProxyCleanerEntryButton
 
 @Composable
 fun DeleteProgressCard(
@@ -53,7 +53,8 @@ fun DeleteProgressCard(
     deleteLog: List<String>,
     onClose: () -> Unit,
     onComplete: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onOpenProxyCleaner: () -> Unit
 ) {
     val primaryColor = uiColors.primary
     val backgroundColor = uiColors.surfaceVariant
@@ -170,7 +171,7 @@ fun DeleteProgressCard(
                                     "다음 캡챠 발생 예상 시간: 계산중..."
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color(0xFFE67E22)
+                                color = uiColors.warningText
                             )
                         }
                     }
@@ -262,13 +263,18 @@ fun DeleteProgressCard(
                     Text("확인", fontWeight = FontWeight.SemiBold)
                 }
             } else {
+                ProxyCleanerEntryButton(
+                    text = "⚡ 대리 클리너 (앱 끄고 2배 빠르게)",
+                    uiColors = uiColors,
+                    onClick = onOpenProxyCleaner
+                )
+                Spacer(Modifier.height(10.dp))
                 Button(
                     onClick = onStop,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(
-                            0xFFFF9800
-                        )
+                        containerColor = uiColors.warning,
+                        contentColor = uiColors.onWarning
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {

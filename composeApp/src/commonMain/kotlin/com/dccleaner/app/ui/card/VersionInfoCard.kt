@@ -24,6 +24,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -58,15 +62,24 @@ fun VersionInfoCard(
     currentVersion: String,
     latestVersion: String?,
     isCheckingVersion: Boolean,
-    onUpdateClick: () -> Unit
+    onUpdateClick: () -> Unit,
+    onDeveloperModeToggle: () -> Unit
 ) {
     val primaryColor = uiColors.primary
     val cardColor = uiColors.card
     val updateAvailable = latestVersion?.let {
         isVersionNewer(it, currentVersion)
     } == true
+    var versionClickCount by remember { mutableIntStateOf(0) }
 
     Card(
+        onClick = {
+            versionClickCount++
+            if (versionClickCount == 10) {
+                versionClickCount = 0
+                onDeveloperModeToggle()
+            }
+        },
         modifier = Modifier
             .fillMaxWidth()
             .shadow(4.dp, RoundedCornerShape(16.dp)),
@@ -141,7 +154,7 @@ fun VersionInfoCard(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = if (updateAvailable) {
-                            uiColors.danger
+                            primaryColor
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
@@ -156,7 +169,7 @@ fun VersionInfoCard(
                     onClick = onUpdateClick,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = uiColors.success
+                        containerColor = primaryColor
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {

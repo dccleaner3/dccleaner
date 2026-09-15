@@ -1,6 +1,11 @@
 package com.dccleaner.app.platform
 
+import com.dccleaner.app.model.RemoteBannerConfig
+import com.dccleaner.app.model.ProxyCleanerPricing
+import com.dccleaner.app.remote.RemoteBannerFetcher
+import com.dccleaner.app.remote.ProxyCleanerPricingFetcher
 import java.awt.Desktop
+import java.io.File
 import java.net.URI
 import java.util.UUID
 
@@ -13,6 +18,18 @@ actual val currentPlatform: RuntimePlatform = RuntimePlatform(
 actual fun generateDeleteTaskId(): String = UUID.randomUUID().toString()
 
 actual fun currentTimeMillis(): Long = System.currentTimeMillis()
+
+actual suspend fun fetchRemoteBannerConfig(): RemoteBannerConfig? {
+    val localConfig = File("docs/ad.json").takeIf(File::isFile)?.readText()
+    return if (localConfig != null) {
+        RemoteBannerFetcher.parse(localConfig)
+    } else {
+        RemoteBannerFetcher.fetchRemote()
+    }
+}
+
+actual suspend fun fetchProxyCleanerPricing(): ProxyCleanerPricing =
+    ProxyCleanerPricingFetcher.fetchRemote()
 
 object DesktopExternalNavigator : ExternalNavigator {
     override fun openUrl(url: String): Boolean = runCatching {

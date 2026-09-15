@@ -8,6 +8,9 @@ data class DaewangconProgress(
     val durationHours: Int = 0,
     val status: String = ""
 ) {
+    val isEnabled: Boolean
+        get() = status.equals("enabled", ignoreCase = true)
+
     val remainingPostCount: Int
         get() = (requiredPostCount - postCount).coerceAtLeast(0)
 

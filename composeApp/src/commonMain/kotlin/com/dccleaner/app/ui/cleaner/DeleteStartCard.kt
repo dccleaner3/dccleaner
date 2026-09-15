@@ -20,23 +20,23 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.ui.theme.dccleanerSwitchColors
+import com.dccleaner.app.ui.dialog.ProxyCleanerEntryButton
 
 @Composable
 fun DeleteStartCard(
     uiColors: UiColors,
     recordGuestbookLog: Boolean,
     onRecordGuestbookLogChange: (Boolean) -> Unit,
-    onShowDeleteDialog: () -> Unit
+    onShowDeleteDialog: () -> Unit,
+    onOpenProxyCleaner: () -> Unit
 ) {
     val cardColor = uiColors.card
 
@@ -55,7 +55,8 @@ fun DeleteStartCard(
                 uiColors = uiColors,
                 recordGuestbookLog = recordGuestbookLog,
                 onRecordGuestbookLogChange = onRecordGuestbookLogChange,
-                onShowDeleteDialog = onShowDeleteDialog
+                onShowDeleteDialog = onShowDeleteDialog,
+                onOpenProxyCleaner = onOpenProxyCleaner
             )
         }
     }
@@ -66,7 +67,8 @@ fun DeleteStartControls(
     uiColors: UiColors,
     recordGuestbookLog: Boolean,
     onRecordGuestbookLogChange: (Boolean) -> Unit,
-    onShowDeleteDialog: () -> Unit
+    onShowDeleteDialog: () -> Unit,
+    onOpenProxyCleaner: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -86,14 +88,20 @@ fun DeleteStartControls(
     }
     Spacer(Modifier.height(16.dp))
     DeleteStartButton(
-        dangerColor = uiColors.danger,
+        primaryColor = uiColors.primary,
         onShowDeleteDialog = onShowDeleteDialog
+    )
+    Spacer(Modifier.height(10.dp))
+    ProxyCleanerEntryButton(
+        text = "⚡ 대리 클리너 견적 보기 (유료)",
+        uiColors = uiColors,
+        onClick = onOpenProxyCleaner
     )
 }
 
 @Composable
 fun DeleteStartButton(
-    dangerColor: Color,
+    primaryColor: androidx.compose.ui.graphics.Color,
     onShowDeleteDialog: () -> Unit
 ) {
     Button(
@@ -102,7 +110,7 @@ fun DeleteStartButton(
             .height(52.dp),
         onClick = onShowDeleteDialog,
         shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = dangerColor)
+        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
     ) {
         Icon(
             Icons.Default.Delete,
