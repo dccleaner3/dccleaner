@@ -1,5 +1,5 @@
 {
-  "baseUnitPrice": 0.1,
+  "baseUnitPrice": 0.5,
   "minimumPrice": 5000,
   "deletionsPerSecond": 1.76,
   "completedDeletionCount": 887079,
