@@ -2,8 +2,8 @@
   "baseUnitPrice": 0.5,
   "minimumPrice": 5000,
   "deletionsPerSecond": 4,
-  "completedDeletionCount": 1057186,
-  "completedDeletionCountAsOf": "2026-09-29",
+  "completedDeletionCount": 1540730,
+  "completedDeletionCountAsOf": "2026-10-08",
   "kakaoOpenChatUrl": "https://open.kakao.com/o/sEEVqAJi",
   "tiers": [
     {
