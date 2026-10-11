@@ -1,23 +1,23 @@
 {
-  "baseUnitPrice": 0.3,
-  "minimumPrice": 5000,
+  "baseUnitPrice": 0.2,
+  "minimumPrice": 3000,
   "deletionsPerSecond": 3.0,
   "kakaoOpenChatUrl": "https://open.kakao.com/o/sEEVqAJi",
   "tiers": [
     {
       "minCount": 1,
-      "maxCount": 50000,
+      "maxCount": 15000,
       "unitPriceMultiplier": 1.0
     },
     {
-      "minCount": 50001,
-      "maxCount": 100000,
-      "unitPriceMultiplier": 0.6666666666666666
+      "minCount": 15001,
+      "maxCount": 50000,
+      "unitPriceMultiplier": 0.5
     },
     {
-      "minCount": 100001,
+      "minCount": 50001,
       "maxCount": null,
-      "unitPriceMultiplier": 0.3333333333333333
+      "unitPriceMultiplier": 0.35
     }
   ]
 }
