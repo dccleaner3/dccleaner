@@ -1,11 +1,9 @@
 package com.dccleaner.app.network
 
 import com.dccleaner.app.model.CollectedPost
-import com.dccleaner.app.model.DaewangconProgress
 import com.dccleaner.app.model.DeleteResult
 import com.dccleaner.app.model.PostDetails
 import com.dccleaner.app.model.PostListResult
-import com.dccleaner.app.model.WriteResult
 
 interface CleanerPort {
     fun getPostListSize(): Int
@@ -39,13 +37,9 @@ interface CleanerPort {
     ): PostListResult
     suspend fun getPostDetails(postUrl: String): PostDetails?
     suspend fun getPostWriterUid(postUrl: String): String?
-    suspend fun writePost(galleryId: String, subject: String, content: String): WriteResult
-    suspend fun writeComment(galleryId: String, postNo: String, content: String): WriteResult
-    suspend fun getDaewangconProgress(): DaewangconProgress?
     suspend fun recordCleanerRunGuestbookLog(
         deletedPosts: Int,
         deletedComments: Int,
         onProgress: (String) -> Unit = {}
     ): Boolean
-    suspend fun setBigcon(): WriteResult
 }

@@ -10,42 +10,34 @@ private const val PREFERENCES_NAME = "saved_accounts_encrypted"
 private const val ACCOUNTS_KEY = "accounts"
 private val savedAccountListType = object : TypeToken<List<SavedAccount>>() {}.type
 
-fun getSavedAccounts(context: Context): List<SavedAccount> {
-    return try {
-        readSavedAccounts(context)
-    } catch (firstError: Exception) {
-        Log.e("SavedAccountStore", "암호화된 계정 정보 로드 실패, 저장소를 복구합니다.", firstError)
-        resetSavedAccountPreferences(context)
-        try {
-            readSavedAccounts(context)
-        } catch (retryError: Exception) {
-            Log.e("SavedAccountStore", "계정 정보 저장소 복구 실패", retryError)
-            emptyList()
-        }
-    }
+@Synchronized
+fun getSavedAccounts(context: Context): List<SavedAccount>? = try {
+    readSavedAccounts(context)
+} catch (error: Exception) {
+    // A read failure may be transient. Preserve the encrypted data for a later retry.
+    Log.e("SavedAccountStore", "암호화된 계정 정보를 읽지 못했습니다. 기존 데이터는 보존합니다.", error)
+    null
 }
 
-fun saveSavedAccounts(context: Context, accounts: List<SavedAccount>): Boolean {
-    return writeSavedAccounts(context, accounts)
-}
-
+@Synchronized
 fun addSavedAccount(context: Context, account: SavedAccount): List<SavedAccount>? {
-    val accounts = getSavedAccounts(context).toMutableList()
+    val accounts = getSavedAccounts(context)?.toMutableList() ?: return null
     accounts.removeAll { it.id == account.id }
     accounts.add(0, account)
-    return accounts.takeIf { saveSavedAccounts(context, it) }
+    return accounts.takeIf { writeSavedAccounts(context, it) }
 }
 
+@Synchronized
 fun removeSavedAccount(context: Context, accountId: String): List<SavedAccount>? {
-    val accounts = getSavedAccounts(context).toMutableList()
+    val accounts = getSavedAccounts(context)?.toMutableList() ?: return null
     accounts.removeAll { it.id == accountId }
-    return accounts.takeIf { saveSavedAccounts(context, it) }
+    return accounts.takeIf { writeSavedAccounts(context, it) }
 }
 
 private fun readSavedAccounts(context: Context): List<SavedAccount> {
     val json = encryptedPreferences(context, PREFERENCES_NAME)
         .getString(ACCOUNTS_KEY, "[]")
-    return Gson().fromJson<List<SavedAccount>>(json, savedAccountListType) ?: emptyList()
+    return requireNotNull(Gson().fromJson<List<SavedAccount>>(json, savedAccountListType))
 }
 
 private fun writeSavedAccounts(context: Context, accounts: List<SavedAccount>): Boolean {
@@ -62,11 +54,5 @@ private fun writeSavedAccounts(context: Context, accounts: List<SavedAccount>): 
     } catch (e: Exception) {
         Log.e("SavedAccountStore", "암호화된 계정 정보 저장 실패", e)
         false
-    }
-}
-
-private fun resetSavedAccountPreferences(context: Context) {
-    if (!context.applicationContext.deleteSharedPreferences(PREFERENCES_NAME)) {
-        Log.w("SavedAccountStore", "기존 계정 정보 저장소가 없거나 삭제하지 못했습니다.")
     }
 }

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.model.UiColors
+import com.dccleaner.app.ui.theme.BusyIndicator
 
 @Composable
 fun DeleteTaskRestoreOverlay(
@@ -51,7 +51,7 @@ fun DeleteTaskRestoreOverlay(
                 .navigationBarsPadding()
                 .padding(bottom = 18.dp),
             colors = CardDefaults.cardColors(containerColor = uiColors.card),
-            border = androidx.compose.foundation.BorderStroke(1.dp, uiColors.outline),
+
             shape = RoundedCornerShape(16.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
         ) {
@@ -59,7 +59,7 @@ fun DeleteTaskRestoreOverlay(
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircularProgressIndicator(
+                BusyIndicator(
                     modifier = Modifier.size(24.dp),
                     color = uiColors.primary,
                     strokeWidth = 2.5.dp

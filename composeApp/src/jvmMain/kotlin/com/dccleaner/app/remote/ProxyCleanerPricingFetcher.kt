@@ -8,20 +8,19 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.HttpURLConnection
 import java.net.URI
-import java.time.LocalDate
 
 private const val PRICING_URL =
     "https://raw.githubusercontent.com/dccleaner3/dccleaner/main/pricing.json"
 private const val MAX_RESPONSE_LENGTH = 32 * 1024
 
 object ProxyCleanerPricingFetcher {
-    suspend fun fetchRemote(): ProxyCleanerPricing = withContext(Dispatchers.IO) {
+    /** 가격 파일을 못 받거나 형식이 틀리면 null. 앱에 내장 가격은 두지 않는다. */
+    suspend fun fetchRemote(): ProxyCleanerPricing? = withContext(Dispatchers.IO) {
         val connection = URI(PRICING_URL).toURL().openConnection() as HttpURLConnection
         connection.connectTimeout = 5_000
         connection.readTimeout = 5_000
@@ -31,16 +30,12 @@ object ProxyCleanerPricingFetcher {
         connection.setRequestProperty("User-Agent", "DCCleaner")
 
         try {
-            if (connection.responseCode !in 200..299) return@withContext ProxyCleanerPricing.Fallback
-            if (connection.contentLengthLong > MAX_RESPONSE_LENGTH) return@withContext ProxyCleanerPricing.Fallback
+            if (connection.responseCode !in 200..299) return@withContext null
+            if (connection.contentLengthLong > MAX_RESPONSE_LENGTH) return@withContext null
             val response = connection.inputStream.bufferedReader().use { it.readText() }
-            if (response.isBlank() || response.length > MAX_RESPONSE_LENGTH) {
-                ProxyCleanerPricing.Fallback
-            } else {
-                parse(response) ?: ProxyCleanerPricing.Fallback
-            }
+            if (response.isBlank() || response.length > MAX_RESPONSE_LENGTH) null else parse(response)
         } catch (_: Exception) {
-            ProxyCleanerPricing.Fallback
+            null
         } finally {
             connection.disconnect()
         }
@@ -60,16 +55,11 @@ object ProxyCleanerPricingFetcher {
         }.orEmpty()
         val baseUnitPrice = json["baseUnitPrice"]?.jsonPrimitive?.doubleOrNull ?: return null
         val minimumPrice = json["minimumPrice"]?.jsonPrimitive?.intOrNull ?: return null
-        val deletionsPerSecond = json["deletionsPerSecond"]?.jsonPrimitive?.doubleOrNull ?: 1.0
-        val completedDeletionCount = json["completedDeletionCount"]?.jsonPrimitive?.longOrNull
-            ?: ProxyCleanerPricing.Fallback.completedDeletionCount
-        val completedDeletionCountAsOf = json["completedDeletionCountAsOf"]?.jsonPrimitive?.contentOrNull
-            ?.takeIf { runCatching { LocalDate.parse(it) }.isSuccess }
-            ?: ProxyCleanerPricing.Fallback.completedDeletionCountAsOf
+        val deletionsPerSecond = json["deletionsPerSecond"]?.jsonPrimitive?.doubleOrNull ?: return null
         val kakaoOpenChatUrl = json["kakaoOpenChatUrl"]?.jsonPrimitive?.contentOrNull
             ?.takeIf { it.startsWith("https://open.kakao.com/") }
-            ?: ProxyCleanerPricing.Fallback.kakaoOpenChatUrl
-        if (baseUnitPrice <= 0.0 || minimumPrice < 0 || deletionsPerSecond <= 0.0 || completedDeletionCount < 0L) return null
+            .orEmpty()
+        if (baseUnitPrice <= 0.0 || minimumPrice < 0 || deletionsPerSecond <= 0.0) return null
         val sortedTiers = tiers.sortedBy(ProxyCleanerPricingTier::minCount)
         if (sortedTiers.isEmpty() || sortedTiers.first().minCount != 1 || sortedTiers.last().maxCount != null ||
             sortedTiers.any {
@@ -84,8 +74,6 @@ object ProxyCleanerPricingFetcher {
             baseUnitPrice,
             minimumPrice,
             deletionsPerSecond,
-            completedDeletionCount,
-            completedDeletionCountAsOf,
             sortedTiers,
             kakaoOpenChatUrl
         )

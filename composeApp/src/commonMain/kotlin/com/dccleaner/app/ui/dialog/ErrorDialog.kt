@@ -38,17 +38,19 @@ fun ErrorDialog(
             )
         },
         title = {
+            // 아이콘이 있으면 제목 자리가 가운데라, 두 줄 제목도 가운데로 맞춘다.
             Text(
                 title,
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         },
         text = {
             Text(
                 errorMessage,
                 style = MaterialTheme.typography.bodyMedium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                textAlign = androidx.compose.ui.text.style.TextAlign.Start
             )
         },
         confirmButton = {

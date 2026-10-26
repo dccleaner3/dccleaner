@@ -1,0 +1,68 @@
+name: macOS Portable Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  package-macos-portable:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Test and build portable app
+        run: ./gradlew :composeApp:desktopTest :composeApp:verifyDesktopRuntimeRestore
+
+      - name: Create portable ZIP
+        env:
+          PORTABLE_ARCH: ${{ matrix.architecture }}
+        run: |
+          app_bundle="composeApp/build/compose/binaries/main-release/app/DCCleaner Mobile.app"
+          launcher="$app_bundle/Contents/MacOS/DCCleaner Mobile"
+          if [[ ! -x "$launcher" ]]; then
+            echo "Portable app launcher not found or not executable: $launcher" >&2
+            exit 1
+          fi
+
+          codesign --force --deep --sign - "$app_bundle"
+          codesign --verify --deep --strict "$app_bundle"
+
+          portable_directory="composeApp/build/portable"
+          archive="$portable_directory/DCCleaner-Mobile-macos-$PORTABLE_ARCH.zip"
+          mkdir -p "$portable_directory"
+          ditto -c -k --sequesterRsrc --keepParent "$app_bundle" "$archive"
+
+          if [[ ! -s "$archive" ]]; then
+            echo "Portable ZIP was not created: $archive" >&2
+            exit 1
+          fi
+          unzip -l "$archive" | grep -F "DCCleaner Mobile.app/Contents/MacOS/DCCleaner Mobile"
+          echo "Portable output: $archive"
+
+      - name: Upload portable app
+        uses: actions/upload-artifact@v7
+        with:
+          name: dccleaner-macos-portable-${{ matrix.architecture }}
+          path: composeApp/build/portable/DCCleaner-Mobile-macos-${{ matrix.architecture }}.zip
+          if-no-files-found: error

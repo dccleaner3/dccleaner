@@ -1,6 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.jetbrains.compose)
 }
@@ -9,20 +9,18 @@ val desktopPackageName = "DCCleaner Mobile"
 val desktopPackageVersion = providers.gradleProperty("dccleaner.version").get()
 val generatedDesktopBuildConfigDir = layout.buildDirectory.dir("generated/source/desktopBuildConfig/kotlin")
 val desktopIconsDir = project.layout.projectDirectory.dir("src/desktopMain/resources/icons")
-val localAdJsonFile = rootProject.file("docs/ad.json")
-val localAdJson = if (localAdJsonFile.isFile) localAdJsonFile.readText() else ""
-val localAdJsonBuildConfigValue = localAdJson
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
-    .replace("\r", "\\r")
-    .replace("\n", "\\n")
 val windowsIconFile = desktopIconsDir.file("app.ico").asFile
 val macIconFile = desktopIconsDir.file("app.icns").asFile
 
 kotlin {
     jvmToolchain(21)
 
-    androidTarget()
+    android {
+        namespace = "com.dccleaner.composeapp"
+        compileSdk = 37
+        minSdk = 26
+        withHostTest {}
+    }
 
     jvm("desktop")
 
@@ -53,7 +51,6 @@ kotlin {
             dependsOn(jvmMain)
             dependencies {
                 implementation(libs.androidx.activity.compose)
-                implementation(project(":musicContract"))
             }
         }
         val commonTest by getting {
@@ -66,6 +63,7 @@ kotlin {
             kotlin.srcDir(generatedDesktopBuildConfigDir)
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(libs.jna)
             }
         }
     }
@@ -96,31 +94,14 @@ tasks.named("compileKotlinDesktop") {
     dependsOn(generateDesktopBuildConfig)
 }
 
-android {
-    namespace = "com.dccleaner.composeapp"
-    compileSdk {
-        version = release(36)
-    }
-
-    defaultConfig {
-        minSdk = 26
-        buildConfigField("String", "LOCAL_AD_JSON", "\"\"")
-    }
-
-    buildTypes {
-        getByName("debug") {
-            buildConfigField("String", "LOCAL_AD_JSON", "\"$localAdJsonBuildConfigValue\"")
-        }
-    }
-
-    buildFeatures {
-        buildConfig = true
-    }
-}
-
 compose.desktop {
     application {
         mainClass = "com.dccleaner.app.desktop.DesktopMainKt"
+
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("desktop-proguard.pro"))
+            optimize.set(false)
+        }
 
         nativeDistributions {
             modules("jdk.unsupported")
@@ -155,9 +136,9 @@ compose.desktop {
 }
 
 tasks.register("verifyDesktopRuntimeRestore", Exec::class) {
-    dependsOn("createDistributable")
+    dependsOn("createReleaseDistributable")
     doFirst {
-        val appDirectory = layout.buildDirectory.dir("compose/binaries/main/app").get().asFile
+        val appDirectory = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile
         val osName = System.getProperty("os.name").lowercase()
         val launcher = when {
             osName.contains("mac") ->

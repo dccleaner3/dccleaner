@@ -1,5 +1,7 @@
 package com.dccleaner.app.ui.dialog
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -18,7 +20,8 @@ import com.dccleaner.app.model.UiColors
 fun DeleteTaskRecordDialog(
     uiColors: UiColors,
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    taskCount: Int = 1
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -33,15 +36,15 @@ fun DeleteTaskRecordDialog(
                 tint = uiColors.danger
             )
         },
-        title = { Text("작업 기록 삭제") },
+        title = { Text(if (taskCount > 1) "작업 기록 전체 삭제" else "작업 기록 삭제") },
         text = {
             Text(
-                "이 작업 기록을 삭제할까요? 저장된 삭제 큐와 진행상황이 함께 " +
-                    "삭제되어 이어서 진행할 수 없습니다."
+                (if (taskCount > 1) "이어할 작업 ${taskCount}개를 모두 삭제할까요? " else "이 작업 기록을 삭제할까요? ") +
+                    "저장된 삭제 큐와 진행상황이 함께 삭제되어 이어서 진행할 수 없습니다."
             )
         },
         confirmButton = {
-            Button(
+            Button(shape = RoundedCornerShape(12.dp),
                 onClick = onConfirm,
                 colors = ButtonDefaults.buttonColors(containerColor = uiColors.danger)
             ) {

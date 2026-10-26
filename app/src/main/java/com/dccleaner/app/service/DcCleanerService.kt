@@ -1,17 +1,17 @@
 package com.dccleaner.app.service
 
-import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.Binder
 import android.os.IBinder
 import android.os.SystemClock
+import com.dccleaner.app.model.DeletePhase
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskState
 import com.dccleaner.app.network.Cleaner
-import com.dccleaner.app.network.MonitoredWrittenPost
-import com.dccleaner.app.network.commentContainsBlockedKeyword
+import com.dccleaner.app.runtime.CommentMonitorConfig
+import com.dccleaner.app.runtime.runCommentMonitor
 import com.dccleaner.app.runtime.DccleanerExecutionEngine
 import com.dccleaner.app.runtime.GuestbookExecutionProgress
 import com.dccleaner.app.runtime.GuestbookExecutionRunner
@@ -20,6 +20,12 @@ import com.dccleaner.app.runtime.RuntimeNotifier
 import com.dccleaner.app.storage.DeleteTaskStore
 import com.dccleaner.app.storage.GuestbookSentUserCache
 import com.dccleaner.app.util.LogManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,36 +47,36 @@ class DcCleanerService : Service() {
         const val NOTIFICATION_ID = 1
         const val CAPTCHA_NOTIFICATION_ID = 2
 
-        private const val SERVICE_PREFS_NAME = "dc_cleaner_service_state"
-        private const val KEY_DAEWANGCON_ACTIVE = "daewangcon_active"
         private const val GUESTBOOK_NOTIFICATION_UPDATE_INTERVAL_MILLIS = 10_000L
         private const val GUESTBOOK_UI_UPDATE_INTERVAL_MILLIS = 1_000L
 
         const val ACTION_START_DELETE = "START_DELETE"
         const val ACTION_STOP_DELETE = "STOP_DELETE"
-        const val ACTION_START_DAEWANGCON = "START_DAEWANGCON"
-        const val ACTION_STOP_DAEWANGCON = "STOP_DAEWANGCON"
         const val ACTION_START_GUESTBOOK = "START_GUESTBOOK"
         const val ACTION_START_COMMENT_CLEANER = "START_COMMENT_CLEANER"
         const val ACTION_STOP_COMMENT_CLEANER = "STOP_COMMENT_CLEANER"
     }
 
     private val binder = LocalBinder()
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val serviceScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private lateinit var logManager: LogManager
     private lateinit var deleteTaskStore: DeleteTaskStore
     private lateinit var guestbookSentUserCache: GuestbookSentUserCache
     private lateinit var notifier: DcCleanerNotifier
     private lateinit var wakeLockManager: WakeLockManager
     private lateinit var engine: DccleanerExecutionEngine
+    private val engineCommandMutex = Mutex()
+    private var pendingEngineCommands = 0
+    private var foregroundStarted = false
+    private var destroyed = false
+    private var shutdownState = DeleteTaskState.INTERRUPTED
+    private var shutdownMessage = "서비스가 종료되어 작업이 중단되었습니다."
     private var notificationUpdateJob: Job? = null
     private var stateMonitorJob: Job? = null
     private var guestbookJob: Job? = null
     private var commentCleanerJob: Job? = null
-    private var preparedDaewangcon: PreparedDaewangcon? = null
     private var preparedGuestbook: PreparedGuestbook? = null
-    private var preparedCommentCleaner: PreparedCommentCleaner? = null
-    private var daewangconNotificationDismissed = false
+    private var preparedCommentCleaner: CommentMonitorConfig? = null
 
     private val _isGuestbookSending = MutableStateFlow(false)
     val isGuestbookSending: StateFlow<Boolean> = _isGuestbookSending.asStateFlow()
@@ -87,10 +93,6 @@ class DcCleanerService : Service() {
     private val _isCommentCleanerRunning = MutableStateFlow(false)
     val isCommentCleanerRunning: StateFlow<Boolean> = _isCommentCleanerRunning.asStateFlow()
 
-    private val servicePreferences by lazy {
-        getSharedPreferences(SERVICE_PREFS_NAME, MODE_PRIVATE)
-    }
-
     val isDeleting: StateFlow<Boolean>
         get() = engine.isDeleting
     val isCompleted: StateFlow<Boolean>
@@ -101,6 +103,8 @@ class DcCleanerService : Service() {
         get() = engine.currentGallery
     val currentGalleryEstimatedTimeLeft: StateFlow<Long>
         get() = engine.currentGalleryEstimatedTimeLeft
+    val currentDeletionSpeedPerHour: StateFlow<Int>
+        get() = engine.currentDeletionSpeedPerHour
     val nextCaptchaEstimatedTimeLeft: StateFlow<Long>
         get() = engine.nextCaptchaEstimatedTimeLeft
     val isTwoCaptchaConfigured: StateFlow<Boolean>
@@ -109,6 +113,8 @@ class DcCleanerService : Service() {
         get() = engine.currentTaskLoginId
     val currentDeleteType: StateFlow<String>
         get() = engine.currentDeleteType
+    val itemCounts get() = engine.itemCounts
+
     val deletedCount: StateFlow<Int>
         get() = engine.deletedCount
     val totalCount: StateFlow<Int>
@@ -121,20 +127,6 @@ class DcCleanerService : Service() {
         get() = engine.showCaptchaDialog
     val captchaFlag: StateFlow<Boolean>
         get() = engine.captchaFlag
-    val isDaewangconRunning: StateFlow<Boolean>
-        get() = engine.isDaewangconRunning
-    val isDaewangconCompleted: StateFlow<Boolean>
-        get() = engine.isDaewangconCompleted
-    val daewangconErrorMessage: StateFlow<String?>
-        get() = engine.daewangconErrorMessage
-    val daewangconProgress: StateFlow<Float>
-        get() = engine.daewangconProgress
-    val daewangconLog: StateFlow<List<String>>
-        get() = engine.daewangconLog
-    val daewangconPostCount: StateFlow<Int>
-        get() = engine.daewangconPostCount
-    val daewangconCommentCount: StateFlow<Int>
-        get() = engine.daewangconCommentCount
 
     inner class LocalBinder : Binder() {
         fun getService(): DcCleanerService = this@DcCleanerService
@@ -153,99 +145,130 @@ class DcCleanerService : Service() {
         engine = DccleanerExecutionEngine(
             deleteTaskStore = deleteTaskStore,
             logSink = RuntimeLogSink { tag, message -> logManager.addLog(tag, message) },
-            notifier = AndroidEngineNotifier(),
-            scope = serviceScope
+            notifier = AndroidEngineNotifier()
         )
-        recoverInterruptedDaewangconIfNeeded()
         startStateMonitor()
         serviceScope.launch { logManager.addLog("Service", "DcCleanerService created") }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val initialNotification = when (intent?.action) {
-            ACTION_START_DAEWANGCON -> notifier.createDaewangconNotification()
             ACTION_START_GUESTBOOK -> notifier.createGuestbookNotification()
             ACTION_START_COMMENT_CLEANER -> notifier.createNotification("댓글 자동 정리 준비 중...")
             else -> notifier.createNotification("삭제 작업 준비 중...")
         }
         startForeground(NOTIFICATION_ID, initialNotification)
+        foregroundStarted = true
         startPeriodicNotificationUpdate()
 
         if (intent == null) {
-            markInterruptedTasksFromProcessRestart()
-            stopDeletion(cancelNotification = true, preserveTask = true)
+            runEngineCommand { markInterruptedTasksFromProcessRestart() }
+            stopDeletion(preserveTask = true)
             return START_NOT_STICKY
         }
 
         when (intent.action) {
             ACTION_STOP_DELETE -> stopDeletion()
-            ACTION_START_DAEWANGCON -> startPreparedDaewangcon()
-            ACTION_STOP_DAEWANGCON -> stopDaewangcon()
             ACTION_START_GUESTBOOK -> startPreparedGuestbook()
             ACTION_START_COMMENT_CLEANER -> startPreparedCommentCleaner()
             ACTION_STOP_COMMENT_CLEANER -> stopCommentCleaner()
         }
+        refreshServiceLifetime()
         return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         if (isDeleting.value) {
-            val taskId = engine.getCurrentTaskId()
-            engine.pauseDeletion(
-                DeleteTaskState.INTERRUPTED,
-                TASK_REMOVED_INTERRUPTION_MESSAGE,
-                notify = false
-            )
-            taskId?.let {
-                notifier.showInterruptionNotification(
-                    it,
-                    "삭제 작업이 중단되었습니다",
+            runEngineCommand {
+                engine.pauseDeletion(
+                    DeleteTaskState.INTERRUPTED,
                     TASK_REMOVED_INTERRUPTION_MESSAGE
                 )
             }
             notifier.cancelCaptchaNotification()
-            stopDeletion(cancelNotification = true, preserveTask = true)
         }
     }
 
     override fun onDestroy() {
-        if (isDeleting.value) {
-            engine.pauseDeletion(
-                DeleteTaskState.INTERRUPTED,
-                "서비스가 종료되어 작업이 중단되었습니다.",
-                notify = false
-            )
-        }
-        super.onDestroy()
+        destroyed = true
         cancelNotificationUpdate()
         stateMonitorJob?.cancel()
         guestbookJob?.cancel()
         commentCleanerJob?.cancel()
-        engine.close()
         wakeLockManager.release()
         serviceScope.cancel()
+        // Finish the current disk operation before closing the engine; never block Main.
+        serviceScope.launch(NonCancellable + Dispatchers.IO) {
+            try {
+                engineCommandMutex.withLock {
+                    if (isDeleting.value) {
+                        engine.pauseDeletion(shutdownState, shutdownMessage, notify = false)
+                    }
+                }
+            } catch (error: Exception) {
+                logManager.addLog("Service", "종료 상태 저장 실패: ${error.message}")
+            } finally {
+                engine.close()
+            }
+        }
+        super.onDestroy()
     }
 
-    fun setCleaner(cleaner: Cleaner) = engine.setCleaner(cleaner)
-
-    fun prepareDaewangcon(
-        cleaner: Cleaner,
-        galleryId: String,
-        postNo: String,
-        postSubject: String,
-        postContent: String,
-        commentContent: String
-    ) {
-        setCleaner(cleaner)
-        preparedDaewangcon = PreparedDaewangcon(
-            galleryId, postNo, postSubject, postContent, commentContent
-        )
+    private fun runEngineCommand(command: () -> Unit) {
+        if (destroyed) return
+        pendingEngineCommands++
+        serviceScope.launch {
+            try {
+                engineCommandMutex.withLock {
+                    withContext(Dispatchers.IO) { command() }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                logManager.addLog("Service", "작업 명령 실패: ${error.message}")
+                notifier.showInterruptionNotification(engine.getCurrentTaskId(), "작업 중단",
+                    "작업을 시작하거나 저장하지 못했습니다. 앱에서 작업 기록을 확인해 주세요.")
+            } finally {
+                pendingEngineCommands--
+                refreshServiceLifetime()
+            }
+        }
     }
 
-    fun clearPreparedDaewangcon() {
-        preparedDaewangcon = null
+    suspend fun stopForLogout() {
+        preparedGuestbook = null
+        preparedCommentCleaner = null
+        pendingEngineCommands++
+        try {
+            guestbookJob?.cancel()
+            commentCleanerJob?.cancel()
+            engineCommandMutex.withLock {
+                withContext(Dispatchers.IO) { engine.stopForLogout() }
+            }
+            guestbookJob?.join()
+            commentCleanerJob?.join()
+            notifier.cancelCaptchaNotification()
+        } finally {
+            pendingEngineCommands--
+            refreshServiceLifetime()
+        }
     }
+
+    suspend fun stopForHandOff(): Boolean {
+        pendingEngineCommands++
+        try {
+            // 멈추지 못했으면(이미 끝나던 참 등) 캡챠를 여전히 기다릴 수 있으므로 알림을 남긴다.
+            return engineCommandMutex.withLock { withContext(Dispatchers.IO) { engine.stopForHandOff() } }
+                .also { if (!isDeleting.value) notifier.cancelCaptchaNotification() }
+        } finally {
+            pendingEngineCommands--
+            refreshServiceLifetime()
+        }
+    }
+
+
+    fun setCleaner(cleaner: Cleaner) = runEngineCommand { engine.setCleaner(cleaner) }
 
     fun prepareGuestbook(cleaner: Cleaner, userIds: List<String>, message: String) {
         preparedGuestbook = PreparedGuestbook(cleaner, userIds, message)
@@ -257,22 +280,23 @@ class DcCleanerService : Service() {
         intervalSeconds: Int,
         monitorMinutes: Int
     ) {
-        preparedCommentCleaner = PreparedCommentCleaner(
-            cleaner,
-            keywords.filter(String::isNotBlank).distinct(),
-            intervalSeconds.coerceAtLeast(5),
-            monitorMinutes.coerceAtLeast(1)
-        )
+        preparedCommentCleaner = CommentMonitorConfig.of(cleaner, keywords, intervalSeconds, monitorMinutes)
     }
 
     fun isDeleting(): Boolean = isDeleting.value
     fun getCurrentTaskLoginId(): String = engine.getCurrentTaskLoginId()
     fun clearError() = engine.clearError()
     fun clearLogs() = engine.clearLogs()
+    fun acknowledgeDeletionResult() = engine.acknowledgeDeletionResult()
     fun resolveCaptcha() {
-        engine.resolveCaptcha()
+        runEngineCommand { engine.resolveCaptcha() }
         notifier.cancelCaptchaNotification()
-        acquireWakeLockIfNeeded()
+    }
+
+    fun useTwoCaptchaKey(key: String) {
+        runEngineCommand {
+            if (engine.useTwoCaptchaKey(key)) notifier.cancelCaptchaNotification()
+        }
     }
 
     fun startDeletion(
@@ -296,95 +320,44 @@ class DcCleanerService : Service() {
         commentRegexFilter: String = "",
         minPostAgeDaysToDelete: Int = -1,
         recordGuestbookLog: Boolean = true,
-        deleteQuestionPosts: Boolean = false
+        deleteQuestionPosts: Boolean = false,
+        followUp: DeletePhase? = null
     ) {
-        acquireWakeLockIfNeeded()
-        engine.startDeletion(
-            selectedGalleries = selectedGalleries,
-            deleteType = deleteType,
-            galleryMap = galleryMap,
-            twoCaptchaApiKey = twoCaptchaApiKey,
-            recommendFilterEnabled = recommendFilterEnabled,
-            commentFilterEnabled = commentFilterEnabled,
-            viewFilterEnabled = viewFilterEnabled,
-            postContentFilterEnabled = postContentFilterEnabled,
-            commentContentFilterEnabled = commentContentFilterEnabled,
-            dateFilterEnabled = dateFilterEnabled,
-            deleteNewestFirst = deleteNewestFirst,
-            deleteQuestionPosts = deleteQuestionPosts,
-            minRecommendToKeep = minRecommendToKeep,
-            minCommentToKeep = minCommentToKeep,
-            minViewToKeep = minViewToKeep,
-            myPostFilterEnabled = myPostFilterEnabled,
-            dcconOnlyFilterEnabled = dcconOnlyFilterEnabled,
-            postContentRegex = postContentRegex,
-            commentRegexFilter = commentRegexFilter,
-            minPostAgeDaysToDelete = minPostAgeDaysToDelete,
-            recordGuestbookLog = recordGuestbookLog
-        )
+        runEngineCommand {
+            engine.startDeletion(
+                selectedGalleries = selectedGalleries,
+                deleteType = deleteType,
+                galleryMap = galleryMap,
+                twoCaptchaApiKey = twoCaptchaApiKey,
+                recommendFilterEnabled = recommendFilterEnabled,
+                commentFilterEnabled = commentFilterEnabled,
+                viewFilterEnabled = viewFilterEnabled,
+                postContentFilterEnabled = postContentFilterEnabled,
+                commentContentFilterEnabled = commentContentFilterEnabled,
+                dateFilterEnabled = dateFilterEnabled,
+                deleteNewestFirst = deleteNewestFirst,
+                deleteQuestionPosts = deleteQuestionPosts,
+                minRecommendToKeep = minRecommendToKeep,
+                minCommentToKeep = minCommentToKeep,
+                minViewToKeep = minViewToKeep,
+                myPostFilterEnabled = myPostFilterEnabled,
+                dcconOnlyFilterEnabled = dcconOnlyFilterEnabled,
+                postContentRegex = postContentRegex,
+                commentRegexFilter = commentRegexFilter,
+                minPostAgeDaysToDelete = minPostAgeDaysToDelete,
+                recordGuestbookLog = recordGuestbookLog,
+                followUp = followUp
+            )
+        }
     }
 
     fun resumeDeletion(task: DeleteTaskProgress) {
-        acquireWakeLockIfNeeded()
-        engine.resumeDeletion(task)
+        runEngineCommand { engine.resumeDeletion(task) }
     }
 
-    fun stopDeletion(cancelNotification: Boolean = true, preserveTask: Boolean = false) {
-        engine.stopDeletion(preserveTask = preserveTask)
+    fun stopDeletion(preserveTask: Boolean = false) {
+        runEngineCommand { engine.stopDeletion(preserveTask = preserveTask) }
         notifier.cancelCaptchaNotification()
-        if (isDaewangconRunning.value || isGuestbookSending.value || isCommentCleanerRunning.value) {
-            when {
-                isGuestbookSending.value -> notifier.updateGuestbookNotification(getGuestbookNotificationText())
-                isDaewangconRunning.value -> notifier.updateDaewangconNotification()
-                else -> notifier.updateNotification("댓글 자동 정리 실행 중")
-            }
-            return
-        }
-        cancelNotificationUpdate()
-        wakeLockManager.release()
-        if (cancelNotification) {
-            stopForegroundCompat(removeNotification = true)
-            notifier.cancelNotification()
-        } else {
-            stopForegroundCompat(removeNotification = false)
-        }
-        stopSelf()
-    }
-
-    fun startDaewangcon(
-        galleryId: String,
-        postNo: String,
-        postSubject: String,
-        postContent: String,
-        commentContent: String
-    ) {
-        acquireWakeLockIfNeeded()
-        daewangconNotificationDismissed = false
-        markDaewangconActive(true)
-        notifier.updateDaewangconNotification()
-        engine.startDaewangcon(galleryId, postNo, postSubject, postContent, commentContent)
-    }
-
-    fun stopDaewangcon() {
-        preparedDaewangcon = null
-        engine.stopDaewangcon()
-        markDaewangconActive(false)
-        if (!isDeleting.value && !isGuestbookSending.value && !isCommentCleanerRunning.value) {
-            cancelNotificationUpdate()
-            wakeLockManager.release()
-            stopForegroundCompat(removeNotification = true)
-            notifier.cancelNotification()
-            stopSelf()
-        }
-    }
-
-    fun dismissDaewangconNotification() {
-        daewangconNotificationDismissed = true
-        engine.acknowledgeDaewangconResult()
-        notifier.cancelNotification()
-        if (!isDeleting.value && !isDaewangconRunning.value && !isGuestbookSending.value &&
-            !isCommentCleanerRunning.value
-        ) stopSelf()
     }
 
     fun startGuestbook(userIds: List<String>, message: String, cleaner: Cleaner) {
@@ -394,7 +367,7 @@ class DcCleanerService : Service() {
         _isGuestbookSending.value = true
         publishGuestbookProgress(emptyGuestbookProgress(userIds.size))
         notifier.updateGuestbookNotification(getGuestbookNotificationText())
-        guestbookJob = serviceScope.launch {
+        guestbookJob = serviceScope.launch(start = CoroutineStart.LAZY) {
             var latestProgress = emptyGuestbookProgress(userIds.size)
             var lastNotificationUpdateAt = SystemClock.elapsedRealtime()
             val senderId = cleaner.getUserId()
@@ -438,16 +411,15 @@ class DcCleanerService : Service() {
                         guestbookSentUserCache.append(senderId, cacheBatch)
                     }
                 }
-                publishGuestbookProgress(latestProgress)
-                _isGuestbookSending.value = false
-                if (!isDeleting.value && !isDaewangconRunning.value && !isCommentCleanerRunning.value) {
-                    cancelNotificationUpdate()
-                    wakeLockManager.release()
-                    stopForegroundCompat(removeNotification = false)
-                    stopSelf()
+                if (guestbookJob === currentCoroutineContext()[Job]) {
+                    publishGuestbookProgress(latestProgress)
+                    _isGuestbookSending.value = false
+                    guestbookJob = null
+                    refreshServiceLifetime()
                 }
             }
         }
+        guestbookJob?.start()
     }
 
     private fun publishGuestbookProgress(progress: GuestbookExecutionProgress) {
@@ -458,46 +430,11 @@ class DcCleanerService : Service() {
         _guestbookFailCount.value = progress.failCount
     }
 
-    private fun startPreparedDaewangcon() {
-        val prepared = preparedDaewangcon
-        preparedDaewangcon = null
-        if (prepared == null) {
-            engine.interruptDaewangcon("대왕콘 작업 시작 정보를 불러오지 못했습니다.")
-            markDaewangconActive(false)
-            cancelNotificationUpdate()
-            wakeLockManager.release()
-            stopForegroundCompat(removeNotification = true)
-            notifier.showDaewangconFailedNotification()
-            stopSelf()
-            return
-        }
-        try {
-            startDaewangcon(
-                prepared.galleryId,
-                prepared.postNo,
-                prepared.postSubject,
-                prepared.postContent,
-                prepared.commentContent
-            )
-        } catch (e: RuntimeException) {
-            engine.interruptDaewangcon("대왕콘 작업을 시작하지 못했습니다: ${e.message ?: "알 수 없는 오류"}")
-            markDaewangconActive(false)
-            cancelNotificationUpdate()
-            wakeLockManager.release()
-            stopForegroundCompat(removeNotification = true)
-            notifier.showDaewangconFailedNotification()
-            stopSelf()
-        }
-    }
-
     private fun startPreparedGuestbook() {
         val prepared = preparedGuestbook
         preparedGuestbook = null
         if (prepared == null) {
-            _isGuestbookSending.value = false
-            stopForegroundCompat(removeNotification = true)
-            notifier.cancelNotification()
-            stopSelf()
+            refreshServiceLifetime()
             return
         }
         startGuestbook(prepared.userIds, prepared.message, prepared.cleaner)
@@ -506,98 +443,40 @@ class DcCleanerService : Service() {
     private fun startPreparedCommentCleaner() {
         val prepared = preparedCommentCleaner
         preparedCommentCleaner = null
-        if (prepared == null || prepared.keywords.isEmpty()) {
+        if (prepared == null || !prepared.hasWork) {
             stopCommentCleaner()
             return
         }
         startCommentCleaner(prepared)
     }
 
-    private fun startCommentCleaner(config: PreparedCommentCleaner) {
-        commentCleanerJob?.cancel()
+    private fun startCommentCleaner(config: CommentMonitorConfig) {
+        val previousJob = commentCleanerJob
+        previousJob?.cancel()
         acquireWakeLockIfNeeded()
         _isCommentCleanerRunning.value = true
-        notifier.updateNotification("댓글 자동 정리 실행 중")
-        commentCleanerJob = serviceScope.launch {
-            val watchedPosts = linkedMapOf<String, WatchedPost>()
-            var latestGallogNo: Long? = null
+        notifier.updateNotification(COMMENT_MONITOR_NOTIFICATION)
+        commentCleanerJob = serviceScope.launch(start = CoroutineStart.LAZY) {
             try {
-                while (isActive) {
-                    val firstPage = config.cleaner.getRecentWrittenPosts()
-                    if (firstPage == null) {
-                        delay(config.intervalSeconds * 1_000L)
-                        continue
-                    }
-                    if (latestGallogNo == null) {
-                        latestGallogNo = firstPage.maxOfOrNull(MonitoredWrittenPost::gallogNo) ?: 0L
-                    } else {
-                        val previousGallogNo = latestGallogNo
-                        var page = 1
-                        var posts: List<MonitoredWrittenPost> = firstPage
-                        while (posts.isNotEmpty()) {
-                            val reachedKnownPost = posts.any { it.gallogNo <= previousGallogNo }
-                            posts.filter { it.gallogNo > previousGallogNo }.forEach { post ->
-                                watchedPosts[post.key] = WatchedPost(post, SystemClock.elapsedRealtime())
-                            }
-                            if (reachedKnownPost) break
-                            delay(Cleaner.POST_REQUEST_DELAY)
-                            posts = config.cleaner.getRecentWrittenPosts(++page) ?: break
-                        }
-                        latestGallogNo = maxOf(
-                            previousGallogNo,
-                            firstPage.maxOfOrNull(MonitoredWrittenPost::gallogNo) ?: previousGallogNo
-                        )
-                    }
-
-                    val expiresAfter = config.monitorMinutes * 60_000L
-                    val now = SystemClock.elapsedRealtime()
-                    watchedPosts.entries.removeAll { now - it.value.detectedAt >= expiresAfter }
-                    watchedPosts.values.forEachIndexed { index, watched ->
-                        if (index > 0) delay(Cleaner.POST_REQUEST_DELAY)
-                        config.cleaner.getMonitoredPostComments(watched.post)
-                            ?.filter { comment ->
-                                comment.id !in watched.deletedCommentIds &&
-                                    commentContainsBlockedKeyword(comment.content, config.keywords)
-                            }
-                            ?.forEach { comment ->
-                                if (config.cleaner.deleteMonitoredPostComment(watched.post, comment.id)) {
-                                    watched.deletedCommentIds += comment.id
-                                }
-                            }
-                    }
-                    delay(config.intervalSeconds * 1_000L)
-                }
+                previousJob?.join()
+                runCommentMonitor(config, SystemClock::elapsedRealtime)
             } finally {
-                _isCommentCleanerRunning.value = false
-                if (!isDeleting.value && !isDaewangconRunning.value && !isGuestbookSending.value) {
-                    cancelNotificationUpdate()
-                    wakeLockManager.release()
-                    stopForegroundCompat(removeNotification = true)
-                    notifier.cancelNotification()
-                    stopSelf()
+                if (commentCleanerJob === currentCoroutineContext()[Job]) {
+                    commentCleanerJob = null
+                    _isCommentCleanerRunning.value = false
+                    refreshServiceLifetime()
                 }
             }
         }
+        commentCleanerJob?.start()
     }
 
     fun stopCommentCleaner() {
         preparedCommentCleaner = null
         commentCleanerJob?.cancel()
-        commentCleanerJob = null
+        // Keep the cancelling job until its finally runs so a restart can join it.
         _isCommentCleanerRunning.value = false
-        if (isDeleting.value) {
-            notifier.updateNotification(getDeletionNotificationText())
-        } else if (isDaewangconRunning.value) {
-            notifier.updateDaewangconNotification()
-        } else if (isGuestbookSending.value) {
-            notifier.updateGuestbookNotification(getGuestbookNotificationText())
-        } else {
-            cancelNotificationUpdate()
-            wakeLockManager.release()
-            stopForegroundCompat(removeNotification = true)
-            notifier.cancelNotification()
-            stopSelf()
-        }
+        refreshServiceLifetime()
     }
 
     private fun startPeriodicNotificationUpdate() {
@@ -607,9 +486,8 @@ class DcCleanerService : Service() {
                 delay(30_000)
                 when {
                     isGuestbookSending.value -> notifier.updateGuestbookNotification(getGuestbookNotificationText())
-                    isDaewangconRunning.value -> notifier.updateDaewangconNotification()
                     isDeleting.value -> notifier.updateNotification(getDeletionNotificationText())
-                    isCommentCleanerRunning.value -> notifier.updateNotification("댓글 자동 정리 실행 중")
+                    isCommentCleanerRunning.value -> notifier.updateNotification(COMMENT_MONITOR_NOTIFICATION)
                 }
             }
         }
@@ -621,66 +499,28 @@ class DcCleanerService : Service() {
     }
 
     private fun startStateMonitor() {
-        stateMonitorJob?.cancel()
         stateMonitorJob = serviceScope.launch {
-            var wasDeleting = false
-            var wasDaewangconRunning = false
-            var wasGuestbookSending = false
-            while (isActive) {
-                val deletingNow = isDeleting.value
-                val daewangconNow = isDaewangconRunning.value
-                val guestbookNow = isGuestbookSending.value
-                val commentCleanerNow = isCommentCleanerRunning.value
-                if (showCaptchaDialog.value) {
-                    wakeLockManager.release()
-                    notifier.showCaptchaNotification(null)
-                }
-                if (wasDeleting && !deletingNow && !daewangconNow && !guestbookNow && !commentCleanerNow) {
-                    cancelNotificationUpdate()
-                    wakeLockManager.release()
-                    if (deletionForegroundStopMode(isCompleted.value) ==
-                        DeletionForegroundStopMode.DetachAfterCompletionDelay
-                    ) {
-                        delay(COMPLETION_NOTIFICATION_DETACH_DELAY_MILLIS)
-                        if (!isDeleting.value && !isDaewangconRunning.value && !isGuestbookSending.value &&
-                            !isCommentCleanerRunning.value
-                        ) {
-                            stopForegroundCompat(removeNotification = false)
-                            stopSelf()
-                        }
-                    } else {
-                        stopForegroundCompat(removeNotification = true)
-                        stopSelf()
-                    }
-                }
-                if (wasDaewangconRunning && !daewangconNow) {
-                    markDaewangconActive(false)
-                    if (!guestbookNow && !commentCleanerNow &&
-                        daewangconFinishMode(deletingNow) == DaewangconFinishMode.StopForegroundAndService
-                    ) {
-                        cancelNotificationUpdate()
-                        wakeLockManager.release()
-                        stopForegroundCompat(removeNotification = true)
-                        if (isDaewangconCompleted.value && !daewangconNotificationDismissed) {
-                            notifier.showDaewangconCompletedNotification()
-                        } else if (daewangconErrorMessage.value != null && !daewangconNotificationDismissed) {
-                            notifier.showDaewangconFailedNotification()
-                        } else {
-                            notifier.cancelNotification()
-                        }
-                        stopSelf()
-                    }
-                }
-                if (wasGuestbookSending && !guestbookNow && !deletingNow && !daewangconNow && !commentCleanerNow) {
-                    cancelNotificationUpdate()
-                    wakeLockManager.release()
-                }
-                wasDeleting = deletingNow
-                wasDaewangconRunning = daewangconNow
-                wasGuestbookSending = guestbookNow
-                delay(500)
-            }
+            combine(isDeleting, isGuestbookSending,
+                isCommentCleanerRunning, showCaptchaDialog) { _, _, _, _ -> Unit }
+                .collect { refreshServiceLifetime() }
         }
+    }
+
+    private fun refreshServiceLifetime() {
+        if (destroyed || pendingEngineCommands > 0 ||
+            preparedGuestbook != null || preparedCommentCleaner != null) return
+        val otherWork = isGuestbookSending.value || isCommentCleanerRunning.value
+        if (isDeleting.value || otherWork) {
+            if (otherWork || !showCaptchaDialog.value) acquireWakeLockIfNeeded()
+            else wakeLockManager.release()
+            return
+        }
+        wakeLockManager.release()
+        if (!foregroundStarted) return
+        foregroundStarted = false
+        cancelNotificationUpdate()
+        stopForegroundCompat(removeNotification = true)
+        stopSelf()
     }
 
     private fun getDeletionNotificationText(): String {
@@ -702,9 +542,8 @@ class DcCleanerService : Service() {
 
     private fun showGuestbookFinishedNotificationIfIdle() {
         when {
-            isDaewangconRunning.value -> notifier.updateDaewangconNotification()
             isDeleting.value -> notifier.updateNotification(getDeletionNotificationText())
-            isCommentCleanerRunning.value -> notifier.updateNotification("댓글 자동 정리 실행 중")
+            isCommentCleanerRunning.value -> notifier.updateNotification(COMMENT_MONITOR_NOTIFICATION)
             else -> notifier.showGuestbookCompletedNotification(
                 _guestbookSuccessCount.value,
                 _guestbookFailCount.value
@@ -732,42 +571,22 @@ class DcCleanerService : Service() {
             }
     }
 
-    @SuppressLint("ApplySharedPref", "UseKtx")
-    private fun markDaewangconActive(active: Boolean) {
-        servicePreferences.edit().putBoolean(KEY_DAEWANGCON_ACTIVE, active).commit()
-    }
-
-    private fun recoverInterruptedDaewangconIfNeeded() {
-        if (!servicePreferences.getBoolean(KEY_DAEWANGCON_ACTIVE, false)) return
-        markDaewangconActive(false)
-        engine.interruptDaewangcon(DAEWANGCON_RECOVERY_FAILURE_MESSAGE)
-        notifier.showDaewangconFailedNotification()
-    }
-
     private fun acquireWakeLockIfNeeded() {
         if (!wakeLockManager.isHeld) wakeLockManager.acquire()
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        if (isDeleting.value) {
-            engine.pauseDeletion(
-                DeleteTaskState.SERVICE_TIMEOUT,
-                "Android 백그라운드 실행 시간 제한에 도달했습니다. 앱을 열어 이어서 진행해 주세요."
-            )
+        shutdownState = DeleteTaskState.SERVICE_TIMEOUT
+        shutdownMessage = "Android 백그라운드 실행 시간 제한에 도달했습니다. 앱을 열어 이어서 진행해 주세요."
+        runEngineCommand {
+            if (isDeleting.value) engine.pauseDeletion(shutdownState, shutdownMessage)
         }
-        if (isDaewangconRunning.value) {
-            engine.interruptDaewangcon(DAEWANGCON_TIMEOUT_MESSAGE)
-            markDaewangconActive(false)
-            if (!daewangconNotificationDismissed) notifier.showDaewangconFailedNotification()
-        }
-        if (isGuestbookSending.value) {
-            guestbookJob?.cancel()
-            _isGuestbookSending.value = false
-        }
-        if (isCommentCleanerRunning.value) stopCommentCleaner()
+        guestbookJob?.cancel()
+        commentCleanerJob?.cancel()
         cancelNotificationUpdate()
         notifier.cancelCaptchaNotification()
         wakeLockManager.release()
+        foregroundStarted = false
         stopForegroundCompat(removeNotification = true)
         stopSelf(startId)
     }
@@ -785,45 +604,28 @@ class DcCleanerService : Service() {
 
     private inner class AndroidEngineNotifier : RuntimeNotifier {
         override fun notify(title: String, message: String) {
-            when {
-                title.contains("캡챠") -> notifier.showCaptchaNotification(null)
-                title.contains("삭제 완료") -> notifier.showCompletedNotification(message)
-                title.contains("대왕콘") -> Unit
-                else -> notifier.showInterruptionNotification(
-                    title.hashCode().toString(),
-                    title,
-                    message
-                )
+            val taskId = engine.getCurrentTaskId()
+            serviceScope.launch {
+                when {
+                    title.contains("캡챠") -> notifier.showCaptchaNotification(null)
+                    title.contains("삭제 완료") -> notifier.showCompletedNotification(message)
+                    else -> notifier.showInterruptionNotification(
+                        taskId,
+                        title,
+                        message
+                    )
+                }
             }
         }
     }
 }
 
-private data class PreparedDaewangcon(
-    val galleryId: String,
-    val postNo: String,
-    val postSubject: String,
-    val postContent: String,
-    val commentContent: String
-)
+private const val COMMENT_MONITOR_NOTIFICATION = "댓글 자동 정리 중"
 
 private data class PreparedGuestbook(
     val cleaner: Cleaner,
     val userIds: List<String>,
     val message: String
-)
-
-private data class PreparedCommentCleaner(
-    val cleaner: Cleaner,
-    val keywords: List<String>,
-    val intervalSeconds: Int,
-    val monitorMinutes: Int
-)
-
-private data class WatchedPost(
-    val post: MonitoredWrittenPost,
-    val detectedAt: Long,
-    val deletedCommentIds: MutableSet<String> = mutableSetOf()
 )
 
 private fun emptyGuestbookProgress(total: Int = 0) = GuestbookExecutionProgress(

@@ -2,6 +2,9 @@ package com.dccleaner.app.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -15,6 +18,18 @@ private val DarkColorScheme = darkColorScheme(
     primary = DarkUiColors.primary,
     secondary = DarkUiColors.primary,
     tertiary = DarkUiColors.primary,
+    primaryContainer = DarkUiColors.surfaceVariant,
+    onPrimaryContainer = DarkUiColors.primary,
+    secondaryContainer = DarkUiColors.surfaceVariant,
+    onSecondaryContainer = DarkUiColors.primary,
+    tertiaryContainer = DarkUiColors.surfaceVariant,
+    onTertiaryContainer = DarkUiColors.primary,
+    surfaceContainerLowest = DarkUiColors.background,
+    surfaceContainerLow = DarkUiColors.card,
+    surfaceContainer = DarkUiColors.card,
+    surfaceContainerHigh = DarkUiColors.card,
+    surfaceContainerHighest = DarkUiColors.surfaceVariant,
+    surfaceTint = DarkUiColors.primary,
     background = DarkUiColors.background,
     surface = DarkUiColors.card,
     surfaceVariant = DarkUiColors.surfaceVariant,
@@ -35,6 +50,18 @@ private val LightColorScheme = lightColorScheme(
     primary = LightUiColors.primary,
     secondary = LightUiColors.primary,
     tertiary = LightUiColors.primary,
+    primaryContainer = LightUiColors.surfaceVariant,
+    onPrimaryContainer = LightUiColors.primary,
+    secondaryContainer = LightUiColors.surfaceVariant,
+    onSecondaryContainer = LightUiColors.primary,
+    tertiaryContainer = LightUiColors.surfaceVariant,
+    onTertiaryContainer = LightUiColors.primary,
+    surfaceContainerLowest = LightUiColors.background,
+    surfaceContainerLow = LightUiColors.card,
+    surfaceContainer = LightUiColors.card,
+    surfaceContainerHigh = LightUiColors.card,
+    surfaceContainerHighest = LightUiColors.surfaceVariant,
+    surfaceTint = LightUiColors.primary,
     background = LightUiColors.background,
     surface = LightUiColors.card,
     surfaceVariant = LightUiColors.surfaceVariant,
@@ -62,6 +89,7 @@ fun DccleanerTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
+        shapes = Shapes(small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp)),
         content = content
     )
 }

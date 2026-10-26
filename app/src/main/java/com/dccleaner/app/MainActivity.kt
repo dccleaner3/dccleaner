@@ -12,6 +12,9 @@ import android.provider.Settings
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.dccleaner.app.util.InAppUriHandler
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -21,6 +24,7 @@ import com.dccleaner.app.ui.theme.DccleanerTheme
 import com.dccleaner.app.service.DcCleanerNotifier
 import com.dccleaner.app.storage.getSavedDarkTheme
 import com.dccleaner.app.storage.saveDarkTheme
+import com.dccleaner.app.ranking.EXTRA_OPEN_GALLERY_RANKING
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +34,8 @@ import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
     private var resumeTaskId by mutableStateOf<String?>(null)
+    /** 갤창랭킹 알림으로 들어왔으면 갤창랭킹 화면을 연다. */
+    private var openGalleryRanking by mutableStateOf(false)
     
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -44,6 +50,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         resumeTaskId = intent.getStringExtra(DcCleanerNotifier.EXTRA_RESUME_TASK_ID)
+        // 프로세스가 죽은 뒤 복원되거나 최근 앱 목록에서 다시 열 때는 처음 인텐트의 표시를 다시 읽지 않는다(사용자가 보던 탭을 지킨다).
+        if (savedInstanceState == null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
+            openGalleryRanking = intent.getBooleanExtra(EXTRA_OPEN_GALLERY_RANKING, false)
+        }
         enableEdgeToEdge()
 
         // The app manages saved accounts itself, so keep system autofill services
@@ -68,19 +78,27 @@ class MainActivity : ComponentActivity() {
                     !darkTheme
             }
 
-            DccleanerTheme(darkTheme = darkTheme) {
-                DcinsideScreen(
-                    resumeTaskId = resumeTaskId,
-                    onResumeTaskConsumed = {
-                        resumeTaskId = null
-                        intent.removeExtra(DcCleanerNotifier.EXTRA_RESUME_TASK_ID)
-                    },
-                    isDarkTheme = darkTheme,
-                    onDarkThemeChange = { enabled ->
-                        darkTheme = enabled
-                        saveDarkTheme(this, enabled)
-                    }
-                )
+            val uriHandler = remember { InAppUriHandler(this) { darkTheme } }
+            CompositionLocalProvider(LocalUriHandler provides uriHandler) {
+                DccleanerTheme(darkTheme = darkTheme) {
+                    DcinsideScreen(
+                        resumeTaskId = resumeTaskId,
+                        onResumeTaskConsumed = {
+                            resumeTaskId = null
+                            intent.removeExtra(DcCleanerNotifier.EXTRA_RESUME_TASK_ID)
+                        },
+                        openGalleryRanking = openGalleryRanking,
+                        onOpenGalleryRankingConsumed = {
+                            openGalleryRanking = false
+                            intent.removeExtra(EXTRA_OPEN_GALLERY_RANKING)
+                        },
+                        isDarkTheme = darkTheme,
+                        onDarkThemeChange = { enabled ->
+                            darkTheme = enabled
+                            saveDarkTheme(this, enabled)
+                        }
+                    )
+                }
             }
         }
     }
@@ -89,6 +107,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         resumeTaskId = intent.getStringExtra(DcCleanerNotifier.EXTRA_RESUME_TASK_ID)
+        openGalleryRanking = intent.getBooleanExtra(EXTRA_OPEN_GALLERY_RANKING, false)
     }
     
     private fun requestNotificationPermission() {

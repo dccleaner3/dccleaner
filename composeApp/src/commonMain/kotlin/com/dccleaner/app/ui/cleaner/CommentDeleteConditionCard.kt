@@ -1,34 +1,16 @@
 package com.dccleaner.app.ui.cleaner
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.model.UiColors
-import com.dccleaner.app.ui.theme.dccleanerSwitchColors
 
 @Composable
 fun CommentDeleteConditionCard(
@@ -47,39 +29,22 @@ fun CommentDeleteConditionCard(
     onDeleteNewestFirstChange: (Boolean) -> Unit,
     minPostAgeDaysToDelete: String,
     onMinPostAgeDaysToDeleteChange: (String) -> Unit,
-    recordGuestbookLog: Boolean,
-    onRecordGuestbookLogChange: (Boolean) -> Unit,
-    onShowDeleteDialog: () -> Unit,
-    onOpenProxyCleaner: () -> Unit
+    proxySpeedPerHour: Int? = null,
+    runOnServer: Boolean = false,
+    onRequireLocal: (apply: () -> Unit) -> Unit = { it() }
 ) {
     val activeOptions = buildList {
         if (commentContentFilterEnabled) add(DeleteFilterOption(DeleteFilterType.COMMENT_CONTENT_REGEX, commentContentRegex))
         if (dateFilterEnabled) add(DeleteFilterOption(DeleteFilterType.AGE_DAYS, minPostAgeDaysToDelete.ifBlank { "5" }))
     }
 
+    // 삭제 설정 시트 안에 놓이므로 카드 바탕·옆 여백 없이 시트의 갤러리 버튼과 줄을 맞춘다.
     Card(
-        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = uiColors.card),
-        border = BorderStroke(1.dp, uiColors.outline),
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         shape = RoundedCornerShape(16.dp)
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Settings, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("댓글 삭제 조건", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(16.dp))
-            BooleanDeleteOption(
-                uiColors, "내 글 필터", "내가 작성한 글에 단 댓글만 삭제합니다.",
-                myPostFilterEnabled, onMyPostFilterEnabledChange
-            )
-            Spacer(Modifier.height(12.dp))
-            BooleanDeleteOption(
-                uiColors, "디시콘만 삭제", "디시콘(이미지) 댓글만 삭제합니다.",
-                dcconOnlyFilterEnabled, onDcconOnlyFilterEnabledChange
-            )
-            Spacer(Modifier.height(16.dp))
+        Column(Modifier.padding(vertical = 4.dp)) {
             DeleteFilterOptionEditor(
                 uiColors = uiColors,
                 allowedTypes = listOf(DeleteFilterType.COMMENT_CONTENT_REGEX, DeleteFilterType.AGE_DAYS),
@@ -92,7 +57,8 @@ fun CommentDeleteConditionCard(
                 onApply = { type, value ->
                     when (type) {
                         DeleteFilterType.COMMENT_CONTENT_REGEX -> {
-                            onCommentContentRegexChange(value); onCommentContentFilterEnabledChange(true)
+                            val apply = { onCommentContentRegexChange(value); onCommentContentFilterEnabledChange(true) }
+                            if (runOnServer) onRequireLocal(apply) else apply()
                         }
                         DeleteFilterType.AGE_DAYS -> {
                             onMinPostAgeDaysToDeleteChange(value); onDateFilterEnabledChange(true)
@@ -108,20 +74,23 @@ fun CommentDeleteConditionCard(
                     }
                 }
             )
-            Spacer(Modifier.height(20.dp))
-            NewestFirstOption(uiColors, "최근 댓글부터 삭제", deleteNewestFirst, onDeleteNewestFirstChange)
-            Spacer(Modifier.height(20.dp))
-            DeleteSpeedSummary(uiColors, if (myPostFilterEnabled) "900" else "1,800", myPostFilterEnabled)
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = uiColors.outline)
-            Spacer(Modifier.height(20.dp))
-            DeleteStartControls(
-                uiColors,
-                recordGuestbookLog,
-                onRecordGuestbookLogChange,
-                onShowDeleteDialog,
-                onOpenProxyCleaner
-            )
+            DeleteSectionDivider(uiColors)
+            AdvancedOptions(listOf(myPostFilterEnabled, dcconOnlyFilterEnabled, deleteNewestFirst).count { it }) {
+                DeleteSwitchRow(
+                    uiColors, "내 글에 단 댓글만", "내가 쓴 글 아래 댓글만 지워요", myPostFilterEnabled, onMyPostFilterEnabledChange
+                )
+                DeleteSwitchRow(
+                    uiColors, "디시콘 댓글만", "디시콘(이미지) 댓글만 지워요", dcconOnlyFilterEnabled, onDcconOnlyFilterEnabledChange
+                )
+                DeleteSwitchRow(
+                    uiColors, "최근 댓글부터 삭제", "최신 댓글부터 한 페이지씩 지워요", deleteNewestFirst
+                ) { enabled ->
+                    if (runOnServer && enabled) onRequireLocal { onDeleteNewestFirstChange(true) } else onDeleteNewestFirstChange(enabled)
+                }
+            }
+            DeleteSectionDivider(uiColors)
+            // The server is halved by the same filter that halves a local run.
+            DeleteSpeedSummary(uiColors, myPostFilterEnabled, proxySpeedPerHour)
         }
     }
 }
@@ -143,34 +112,11 @@ internal fun commentDeleteConditionSummary(
     }
     return when {
         firstStage.isNotEmpty() && secondStage.isNotEmpty() ->
-            "1차 필터 · 삭제 후보\n${firstStage.joinToString(" 그리고 ")}\n\n" +
-                "2차 필터 · 최종 대상\n${secondStage.joinToString(" 또는 ")}\n\n" +
-                "두 필터를 모두 통과한 댓글만 삭제합니다."
-        firstStage.isNotEmpty() -> "삭제 필터\n${firstStage.joinToString(" 그리고 ")}"
-        secondStage.isNotEmpty() -> "삭제 필터\n${secondStage.joinToString(" 또는 ")}"
+            "먼저 고르는 조건\n${firstStage.joinToString(" 그리고 ")}\n\n" +
+                "그중에서 지울 것\n${secondStage.joinToString(" 또는 ")}\n\n" +
+                "두 조건을 모두 만족하는 댓글만 지워요"
+        firstStage.isNotEmpty() -> "지울 조건\n${firstStage.joinToString(" 그리고 ")}"
+        secondStage.isNotEmpty() -> "지울 조건\n${secondStage.joinToString(" 또는 ")}"
         else -> null
     }
-}
-
-@Composable
-private fun BooleanDeleteOption(
-    uiColors: UiColors,
-    title: String,
-    description: String,
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Info, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(title, fontWeight = FontWeight.Medium)
-        }
-        Switch(enabled, onEnabledChange, colors = dccleanerSwitchColors(uiColors))
-    }
-    if (enabled) DeleteOptionDescription(description)
 }

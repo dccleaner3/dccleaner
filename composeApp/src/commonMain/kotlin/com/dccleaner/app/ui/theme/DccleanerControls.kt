@@ -20,7 +20,7 @@ fun dccleanerOutlinedTextFieldColors(uiColors: UiColors): TextFieldColors =
         focusedContainerColor = uiColors.surfaceVariant,
         unfocusedContainerColor = uiColors.surfaceVariant,
         disabledContainerColor = uiColors.surfaceVariant.copy(alpha = 0.56f),
-        unfocusedBorderColor = uiColors.outline,
+        unfocusedBorderColor = Color.Transparent,
         disabledBorderColor = uiColors.outline.copy(alpha = 0.56f),
         unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
         unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,

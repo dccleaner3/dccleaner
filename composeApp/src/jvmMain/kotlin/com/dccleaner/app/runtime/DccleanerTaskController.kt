@@ -1,5 +1,6 @@
 package com.dccleaner.app.runtime
 
+import com.dccleaner.app.model.DeletePhase
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskState
 import com.dccleaner.app.network.CleanerPort
@@ -28,23 +29,18 @@ class DccleanerTaskController(
     val progress = engine.progress
     val currentGallery = engine.currentGallery
     val currentGalleryEstimatedTimeLeft = engine.currentGalleryEstimatedTimeLeft
+    val currentDeletionSpeedPerHour = engine.currentDeletionSpeedPerHour
     val nextCaptchaEstimatedTimeLeft = engine.nextCaptchaEstimatedTimeLeft
     val isTwoCaptchaConfigured = engine.isTwoCaptchaConfigured
     val currentTaskLoginId = engine.currentTaskLoginId
     val currentDeleteType = engine.currentDeleteType
+    val itemCounts = engine.itemCounts
     val deletedCount = engine.deletedCount
     val totalCount = engine.totalCount
     val deleteLog = engine.deleteLog
     val errorMessage = engine.errorMessage
     val showCaptchaDialog = engine.showCaptchaDialog
     val captchaFlag = engine.captchaFlag
-    val isDaewangconRunning = engine.isDaewangconRunning
-    val isDaewangconCompleted = engine.isDaewangconCompleted
-    val daewangconErrorMessage = engine.daewangconErrorMessage
-    val daewangconProgress = engine.daewangconProgress
-    val daewangconLog = engine.daewangconLog
-    val daewangconPostCount = engine.daewangconPostCount
-    val daewangconCommentCount = engine.daewangconCommentCount
 
     fun setCleaner(cleaner: CleanerPort) = engine.setCleaner(cleaner)
     fun clearError() = engine.clearError()
@@ -72,7 +68,8 @@ class DccleanerTaskController(
         postContentRegex: String = "",
         commentRegexFilter: String = "",
         minPostAgeDaysToDelete: Int = -1,
-        recordGuestbookLog: Boolean = true
+        recordGuestbookLog: Boolean = true,
+        followUp: DeletePhase? = null
     ) = engine.startDeletion(
         selectedGalleries = selectedGalleries,
         deleteType = deleteType,
@@ -94,7 +91,8 @@ class DccleanerTaskController(
         postContentRegex = postContentRegex,
         commentRegexFilter = commentRegexFilter,
         minPostAgeDaysToDelete = minPostAgeDaysToDelete,
-        recordGuestbookLog = recordGuestbookLog
+        recordGuestbookLog = recordGuestbookLog,
+        followUp = followUp
     )
 
     fun resumeDeletion(task: DeleteTaskProgress) = engine.resumeDeletion(task)
@@ -105,24 +103,8 @@ class DccleanerTaskController(
         notify: Boolean = true
     ) = engine.pauseDeletion(state, message, notify = notify)
     fun resolveCaptcha() = engine.resolveCaptcha()
-
-    fun startDaewangcon(
-        galleryId: String,
-        postNo: String,
-        postSubject: String,
-        postContent: String,
-        commentContent: String
-    ) = engine.startDaewangcon(
-        galleryId = galleryId,
-        postNo = postNo,
-        postSubject = postSubject,
-        postContent = postContent,
-        commentContent = commentContent
-    )
-
-    fun stopDaewangcon() = engine.stopDaewangcon()
-    fun interruptDaewangcon(message: String) = engine.interruptDaewangcon(message)
-    fun acknowledgeDaewangconResult() = engine.acknowledgeDaewangconResult()
+    fun useTwoCaptchaKey(key: String) = engine.useTwoCaptchaKey(key)
+    suspend fun stopForHandOff() = engine.stopForHandOff()
 
     fun close() {
         if (engine.isDeleting.value) {
@@ -131,9 +113,6 @@ class DccleanerTaskController(
                 message = "앱 종료로 삭제 작업이 중단되었습니다. 다음 실행 시 이어서 진행할 수 있습니다.",
                 notify = true
             )
-        }
-        if (engine.isDaewangconRunning.value) {
-            engine.interruptDaewangcon("앱 종료로 대왕콘 작업이 중단되었습니다.")
         }
         engine.close()
         scope.cancel()

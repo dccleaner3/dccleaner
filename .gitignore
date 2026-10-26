@@ -1,3 +1,24 @@
+# 프로젝트 전용
+# 릴리스 노트는 배포할 때만 쓰는 로컬 파일
+docs/release.md
+# 배포용 빌드 결과물(APK·MSI·ZIP)
+/buildFiles/
+# Kotlin 2.x 컴파일러 캐시
+.kotlin/
+# 서명 키와 비밀 설정
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.*
+# 문서 사이트 로컬 미리보기(Jekyll)
+docs/_site/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+docs/.sass-cache/
+docs/Gemfile.lock
+docs/vendor/
+
 *.iml
 .gradle
 /local.properties
@@ -5,6 +26,7 @@
 /.idea/libraries
 /.idea/modules.xml
 /.idea/workspace.xml
+/.idea/deploymentTargetSelector.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
@@ -349,5 +371,3 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.gitignore.io/api/java,linux,macos,windows,android,intellij,androidstudio
-
-.gitattributes

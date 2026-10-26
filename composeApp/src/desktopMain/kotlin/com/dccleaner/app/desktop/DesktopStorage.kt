@@ -5,10 +5,15 @@ import com.dccleaner.app.model.DeleteQueueCheckpoint
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskState
 import com.dccleaner.app.model.isEligibleForResume
+import com.dccleaner.app.platform.ProxyCleanerStorage
 import com.dccleaner.app.runtime.DeleteTaskStorePort
 import com.dccleaner.app.runtime.RuntimeLogSink
 import com.dccleaner.app.runtime.RuntimeNotifier
+import com.dccleaner.app.util.LogVolumeFilter
+import com.dccleaner.app.util.RotatingLogFile
 import com.dccleaner.app.util.SensitiveLogSanitizer
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.awt.SystemTray
@@ -17,6 +22,8 @@ import java.awt.image.BufferedImage
 import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.prefs.Preferences
 
 object DesktopPaths {
@@ -54,6 +61,23 @@ class DesktopThemePreferenceStore(
         preferences.flush()
     }
 
+    /** 클리너 탭에서 마지막에 고른 지울 대상. 저장한 적이 없으면 아무것도 안 고른 상태다. */
+    fun getDeleteTargets(): Set<String> =
+        preferences.get(KEY_DELETE_TARGETS, "").split(',').filterTo(mutableSetOf()) { it == "posting" || it == "comment" }
+
+    fun saveDeleteTargets(targets: Set<String>) {
+        preferences.put(KEY_DELETE_TARGETS, targets.sorted().joinToString(","))
+        preferences.flush()
+    }
+
+    fun getDeleteCommentFirst(): Boolean =
+        preferences.getBoolean(KEY_DELETE_COMMENT_FIRST, true)
+
+    fun saveDeleteCommentFirst(commentFirst: Boolean) {
+        preferences.putBoolean(KEY_DELETE_COMMENT_FIRST, commentFirst)
+        preferences.flush()
+    }
+
     fun getDeveloperMode(): Boolean =
         preferences.getBoolean(KEY_DEVELOPER_MODE, false)
 
@@ -66,6 +90,8 @@ class DesktopThemePreferenceStore(
         const val KEY_DARK_THEME = "dark_theme"
         const val KEY_RECORD_GUESTBOOK_LOG = "record_guestbook_log"
         const val KEY_DEVELOPER_MODE = "developer_mode"
+        const val KEY_DELETE_TARGETS = "delete_targets"
+        const val KEY_DELETE_COMMENT_FIRST = "delete_comment_first"
     }
 }
 
@@ -185,7 +211,10 @@ class DesktopDeleteTaskStore(
         if (!tasksFile.exists()) return@runCatching emptyList()
         tasksFile.reader(Charsets.UTF_8).use { reader ->
             val tasks = gson.fromJson<List<DeleteTaskProgress>>(reader, taskListType) ?: emptyList()
-            tasks.map { task -> task.copy(twoCaptchaApiKey = "") }
+            // 키는 @Transient라 저장되지 않아 Gson이 null로 채운다. 이어서 할 단계(followUp)도 빈 값으로 맞춘다.
+            tasks.map { task ->
+                task.copy(twoCaptchaApiKey = "", followUp = task.followUp?.copy(twoCaptchaApiKey = ""))
+            }
         }
     }.getOrDefault(emptyList())
 
@@ -215,12 +244,21 @@ class DesktopDeleteTaskStore(
     }.getOrNull()
 }
 
+/**
+ * 데스크톱 앱 로그. 예전에는 회전 없이 계속 커졌다(실측 296MB). 10MB마다 압축해 최근 5개(14일)만 둔다.
+ * 삭제마다 반복되는 시작·성공 줄은 5분 요약으로 묶고, 묶이지 않은 줄만 마스킹해서 쓴다.
+ */
 class DesktopFileLogSink(
-    private val file: File = File(DesktopPaths.appDataDir, "dccleaner.log")
+    file: File = File(DesktopPaths.appDataDir, "dccleaner.log")
 ) : RuntimeLogSink {
+    private val out = RotatingLogFile(file, maxBytes = 10L * 1024 * 1024, keepDays = 14, maxArchives = 5)
+    private val volume = LogVolumeFilter()
+    private val time = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+
     override suspend fun addLog(tag: String, message: String) {
-        file.parentFile?.mkdirs()
-        file.appendText("[${System.currentTimeMillis()}][$tag] ${SensitiveLogSanitizer.sanitize(message)}\n", Charsets.UTF_8)
+        volume.filter(tag, message).forEach { (t, m) ->
+            out.append("[${LocalDateTime.now().format(time)}][$t] ${SensitiveLogSanitizer.sanitize(m)}")
+        }
     }
 }
 
@@ -239,7 +277,7 @@ class DesktopTrayNotifier : RuntimeNotifier {
     }
 }
 
-private fun atomicWriteText(file: File, text: String) {
+internal fun atomicWriteText(file: File, text: String) {
     file.parentFile?.let { parent ->
         if (!parent.exists() && !parent.mkdirs()) error("Could not create ${parent.absolutePath}")
     }
@@ -250,4 +288,45 @@ private fun atomicWriteText(file: File, text: String) {
     }
     if (file.exists() && !file.delete()) error("Could not replace ${file.absolutePath}")
     if (!temp.renameTo(file)) error("Could not write ${file.absolutePath}")
+}
+
+/**
+ * Keeps the proxy cleaner's Supabase refresh token in the OS credential store. Losing it hands
+ * the user a new code and strands their credits, so read failures propagate instead of
+ * looking like "no token yet".
+ */
+internal class DesktopProxyCleanerStorage(
+    private val credentialStore: DesktopCredentialStore?,
+    private val preferences: Preferences = Preferences.userRoot().node("com/dccleaner/app/desktop/proxy"),
+    private val root: File = DesktopPaths.appDataDir
+) : ProxyCleanerStorage {
+    // Linux has no supported credential store; fall back to an owner-only file.
+    private val tokenFile = File(root, "proxy_session")
+    private val useFile = !credentialStorageSupported()
+
+    override fun readRefreshToken(): String? =
+        if (useFile) tokenFile.takeIf(File::isFile)?.readText(Charsets.UTF_8)?.trim()?.ifBlank { null }
+        else requireStore().getProxyRefreshToken()
+
+    override fun writeRefreshToken(token: String) {
+        if (!useFile) return requireStore().saveProxyRefreshToken(token)
+        atomicWriteText(tokenFile, token)
+        runCatching {
+            Files.setPosixFilePermissions(tokenFile.toPath(), PosixFilePermissions.fromString("rw-------"))
+        }
+    }
+
+    override fun hasConsent(): Boolean = preferences.getBoolean(KEY_CONSENT, false)
+
+    override fun saveConsent() {
+        preferences.putBoolean(KEY_CONSENT, true)
+        preferences.flush()
+    }
+
+    private fun requireStore(): DesktopCredentialStore =
+        credentialStore ?: error("운영체제 보안 저장소를 열지 못했습니다.")
+
+    private companion object {
+        const val KEY_CONSENT = "consent_accepted"
+    }
 }

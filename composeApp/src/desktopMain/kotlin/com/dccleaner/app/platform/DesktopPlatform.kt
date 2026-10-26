@@ -19,7 +19,7 @@ actual fun generateDeleteTaskId(): String = UUID.randomUUID().toString()
 
 actual fun currentTimeMillis(): Long = System.currentTimeMillis()
 
-actual suspend fun fetchRemoteBannerConfig(): RemoteBannerConfig? {
+actual suspend fun fetchRemoteBannerConfig(localJson: String?): RemoteBannerConfig? {
     val localConfig = File("docs/ad.json").takeIf(File::isFile)?.readText()
     return if (localConfig != null) {
         RemoteBannerFetcher.parse(localConfig)
@@ -28,7 +28,7 @@ actual suspend fun fetchRemoteBannerConfig(): RemoteBannerConfig? {
     }
 }
 
-actual suspend fun fetchProxyCleanerPricing(): ProxyCleanerPricing =
+actual suspend fun fetchProxyCleanerPricing(): ProxyCleanerPricing? =
     ProxyCleanerPricingFetcher.fetchRemote()
 
 object DesktopExternalNavigator : ExternalNavigator {

@@ -1,0 +1,70 @@
+---
+---
+
+@import "{{ site.theme }}";
+
+// 한국어는 글자가 아니라 단어 단위로 줄바꿈
+.markdown-body {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  line-height: 1.7;
+}
+
+// 데스크톱에서 한 줄이 너무 길어지지 않게
+.container-lg { max-width: 820px; }
+
+// 테마가 맨 위에 넣는 사이트 이름은 작은 브랜드 줄로
+.markdown-body > h1:first-child {
+  font-size: 18px;
+  padding-bottom: 12px;
+  margin-bottom: 28px;
+}
+
+// 구분선은 얇게, 제목 밑줄은 빼서 선이 겹치지 않게
+.markdown-body h1:not(:first-child),
+.markdown-body h2 { border-bottom: 0; padding-bottom: 0; }
+.markdown-body hr { height: 1px; margin: 40px 0; }
+
+// 인용 블록은 상자형 안내로
+.markdown-body blockquote {
+  color: #586069;
+  background: #f6f8fa;
+  border-left: 0;
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+.markdown-body blockquote.tip { color: #24292e; background: #eef5ff; }
+.markdown-body blockquote.warn { color: #24292e; background: #fff6e0; }
+
+// 다운로드 버튼
+.markdown-body a.cta {
+  display: inline-block;
+  padding: 12px 22px;
+  border-radius: 12px;
+  background: #0366d6;
+  color: #fff;
+  font-weight: 600;
+  line-height: 1.4;
+  &:hover, &:focus { background: #0256b9; text-decoration: none; }
+}
+.markdown-body .platforms { display: block; margin-top: 8px; color: #586069; font-size: 14px; }
+.markdown-body small { color: #586069; }
+
+// 표는 촘촘하게, 휴대폰에서는 글자를 조금 작게
+.markdown-body table { line-height: 1.5; }
+@media (max-width: 544px) {
+  .markdown-body table { font-size: 14px; }
+  .markdown-body table th, .markdown-body table td { padding: 8px 10px; }
+}
+
+// 바로 가기 칩
+.markdown-body .jump a {
+  display: inline-block;
+  margin: 0 4px 8px 0;
+  padding: 8px 14px;
+  border: 1px solid #e1e4e8;
+  border-radius: 999px;
+  color: #24292e;
+  font-size: 14px;
+  &:hover { border-color: #0366d6; color: #0366d6; text-decoration: none; }
+}

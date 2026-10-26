@@ -1,6 +1,5 @@
 package com.dccleaner.app.platform
 
-import com.dccleaner.composeapp.BuildConfig
 import com.dccleaner.app.model.RemoteBannerConfig
 import com.dccleaner.app.remote.RemoteBannerFetcher
 import com.dccleaner.app.model.ProxyCleanerPricing
@@ -17,12 +16,12 @@ actual fun generateDeleteTaskId(): String = UUID.randomUUID().toString()
 
 actual fun currentTimeMillis(): Long = System.currentTimeMillis()
 
-actual suspend fun fetchRemoteBannerConfig(): RemoteBannerConfig? =
-    if (BuildConfig.DEBUG) {
-        RemoteBannerFetcher.parse(BuildConfig.LOCAL_AD_JSON)
+actual suspend fun fetchRemoteBannerConfig(localJson: String?): RemoteBannerConfig? =
+    if (localJson != null) {
+        RemoteBannerFetcher.parse(localJson)
     } else {
         RemoteBannerFetcher.fetchRemote()
     }
 
-actual suspend fun fetchProxyCleanerPricing(): ProxyCleanerPricing =
+actual suspend fun fetchProxyCleanerPricing(): ProxyCleanerPricing? =
     ProxyCleanerPricingFetcher.fetchRemote()

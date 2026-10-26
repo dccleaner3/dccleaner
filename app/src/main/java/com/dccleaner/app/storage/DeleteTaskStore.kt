@@ -25,9 +25,10 @@ class DeleteTaskStore(context: Context) : DeleteTaskStorePort {
     }
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val secretPrefs: SharedPreferences? = runCatching {
-        encryptedPreferences(context, SECRET_PREFS_NAME)
-    }.getOrNull()
+    private val appContext = context.applicationContext
+    private val secretPrefs: SharedPreferences? by lazy {
+        runCatching { encryptedPreferences(appContext, SECRET_PREFS_NAME) }.getOrNull()
+    }
     private val queueDirectory = File(context.applicationContext.filesDir, "delete_task_queues")
     private val gson = Gson()
     private val taskListType = object : TypeToken<List<DeleteTaskProgress>>() {}.type
@@ -172,7 +173,12 @@ class DeleteTaskStore(context: Context) : DeleteTaskStorePort {
         val json = prefs.getString(KEY_TASKS, null) ?: return@runCatching emptyList()
         val tasks = gson.fromJson<List<DeleteTaskProgress>>(json, taskListType) ?: emptyList()
         tasks.map { task ->
-            task.copy(twoCaptchaApiKey = secretPrefs?.getString(task.id, "").orEmpty())
+            // @Transient 키는 Gson이 null로 채운다. 안에 저장된 다음 단계(followUp)도 빈 값으로 맞춰
+            // hashCode 등에서 null이 터지지 않게 한다. 다음 단계 키는 넘어갈 때 엔진이 앞 단계 키로 채운다.
+            task.copy(
+                twoCaptchaApiKey = secretPrefs?.getString(task.id, "").orEmpty(),
+                followUp = task.followUp?.copy(twoCaptchaApiKey = "")
+            )
         }
     }.getOrDefault(emptyList())
 

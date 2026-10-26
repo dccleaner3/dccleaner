@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.dp
 internal fun DeleteOptionDescription(text: String) {
     Text(
         text = text,
-        modifier = Modifier.padding(start = 28.dp, end = 8.dp),
+        modifier = Modifier.padding(end = 8.dp),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
     )

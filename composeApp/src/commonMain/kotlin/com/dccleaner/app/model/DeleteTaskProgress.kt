@@ -3,6 +3,21 @@ package com.dccleaner.app.model
 import com.dccleaner.app.platform.currentTimeMillis
 import com.dccleaner.app.platform.generateDeleteTaskId
 
+data class DeleteItemCounts(val deleted: Int = 0, val skipped: Int = 0)
+
+/**
+ * 글+댓글 순서대로 지울 때 두 번째 단계 설정. 나머지 조건(추천·정규식 등)은 종류별로 이미 따로라 첫 단계 작업에서 그대로 가져가고,
+ * 종류마다 따로 정하는 갤러리·날짜 조건·최근부터 삭제만 여기에 담는다.
+ */
+data class DeletePhase(
+    val deleteType: String,
+    val selectedGalleries: List<String>,
+    val galleryMap: Map<String, String>,
+    val dateFilterEnabled: Boolean,
+    val deleteNewestFirst: Boolean,
+    val minPostAgeDaysToDelete: Int
+)
+
 enum class DeleteTaskState {
     RUNNING,
     PAUSED_BY_USER,
@@ -39,6 +54,11 @@ data class DeleteTaskProgress(
     val commentRegexFilter: String = "",
     val minPostAgeDaysToDelete: Int = -1,
     val recordGuestbookLog: Boolean = true,
+    /** 글+댓글을 함께 고르면 이 작업이 끝난 뒤 이어서 할 두 번째 단계. 작업 기록에 같이 저장돼 중간에 끊겨도 이어진다. */
+    val followUp: DeleteTaskProgress? = null,
+    /** 앞 단계에서 지운 글·댓글 수. 마지막 단계가 끝날 때 방명록 기록·완료 알림에 합쳐 쓴다. */
+    val carriedDeletedPosts: Int = 0,
+    val carriedDeletedComments: Int = 0,
     val currentGalleryIndex: Int = 0,
     val currentGalleryName: String = "",
     val completedGalleries: Int = 0,
@@ -46,6 +66,7 @@ data class DeleteTaskProgress(
     val currentGallerySkipped: Int = 0,
     val currentGalleryCaptchaSolved: Int = 0,
     val totalDeleted: Int = 0,
+    val totalSkipped: Int = 0,
     val queueGalleryIndex: Int = -1,
     val queueSize: Int = 0,
     val queueCursor: Int = 0,
@@ -72,6 +93,7 @@ data class DeleteTaskProgress(
         val effectiveDateFilter = dateFilterEnabled || minPostAgeDaysToDelete >= 0
 
         return copy(
+            totalSkipped = maxOf(totalSkipped, currentGallerySkipped),
             recommendFilterEnabled = effectiveRecommendFilter,
             commentFilterEnabled = effectiveCommentFilter,
             viewFilterEnabled = effectiveViewFilter,

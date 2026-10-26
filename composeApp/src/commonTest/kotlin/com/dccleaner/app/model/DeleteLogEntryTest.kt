@@ -3,9 +3,22 @@ package com.dccleaner.app.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DeleteLogEntryTest {
+    @Test
+    fun currentGalleryProgressReadsOnlyTheNumbers() {
+        val log = listOf(
+            "[12:00:00] 🚀 국내야구 게시글 삭제 시작",
+            "[12:00:01] $DELETE_PROGRESS_LOG_MARKER" + deleteGalleryProgressMessage(deleted = 117, skipped = 3, total = 500)
+        )
+        assertEquals(120 to 500, log.currentGalleryProgress())
+        assertEquals(4 to null, listOf(DELETE_PROGRESS_LOG_MARKER + deleteGalleryProgressMessage(4, 0, null)).currentGalleryProgress())
+        // 끝난 갤러리의 진행 줄(표지 없음)은 현재 진행으로 보지 않는다.
+        assertNull(listOf("[12:00:02] " + deleteGalleryProgressMessage(120, 0, 120)).currentGalleryProgress())
+    }
+
     @Test
     fun guestbookRunCompletionRecognizesSuccessAndFinalFailure() {
         assertTrue("[12:34:56] ✅ 방명록 가동 기록 작성 완료".isGuestbookRunLogCompletion())

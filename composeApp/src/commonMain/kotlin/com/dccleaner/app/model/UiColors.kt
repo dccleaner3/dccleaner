@@ -24,11 +24,11 @@ data class UiColors(
 fun dccleanerUiColors(darkTheme: Boolean): UiColors =
     if (darkTheme) {
         UiColors(
-            primary = Color(0xFF7CB7F5),
-            background = Color(0xFF121316),
-            card = Color(0xFF1E1F24),
-            surfaceVariant = Color(0xFF292B31),
-            outline = Color(0xFF333741),
+            primary = Color(0xFF80B6FF),
+            background = Color(0xFF111114),
+            card = Color(0xFF1C1C20),
+            surfaceVariant = Color(0xFF28282D),
+            outline = Color(0xFF38383D),
             textSecondary = Color(0xFFAEB4BC),
             success = Color(0xFF66BB6A),
             warning = Color(0xFFFFB74D),
@@ -41,19 +41,19 @@ fun dccleanerUiColors(darkTheme: Boolean): UiColors =
         )
     } else {
         UiColors(
-            primary = Color(0xFF1976D2),
-            background = Color(0xFFF5F5F5),
+            primary = Color(0xFF0066CC),
+            background = Color(0xFFF2F2F7),
             card = Color.White,
-            surfaceVariant = Color(0xFFF5F5F5),
-            outline = Color(0xFFDADCE0),
-            textSecondary = Color(0xFF6F737A),
+            surfaceVariant = Color(0xFFF2F2F7),
+            outline = Color(0xFFE1E1E6),
+            textSecondary = Color(0xFF676B72),
             success = Color(0xFF2E7D32),
             warning = Color(0xFFFF9800),
             warningText = Color(0xFF9A4D00),
             onWarning = Color(0xFF2B1600),
             danger = Color(0xFFD32F2F),
             onDanger = Color.White,
-            headerStart = Color(0xFF1976D2),
+            headerStart = Color(0xFF0066CC),
             headerEnd = Color(0xFF0F5FAE)
         )
     }

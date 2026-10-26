@@ -17,6 +17,9 @@ class DcCleanerNotifier(
     companion object {
         const val EXTRA_RESUME_TASK_ID = "resume_task_id"
         private const val COMPLETION_CHANNEL_ID = "DCCLEANER_COMPLETION_CHANNEL"
+        private const val COMPLETION_NOTIFICATION_ID = 3
+        // 충전 알림은 작업 완료 알림을 덮어쓰지 않게 따로 둔다.
+        private const val CHARGE_NOTIFICATION_ID = 4
         private const val INTERRUPTION_CHANNEL_ID = "DCCLEANER_INTERRUPTION_CHANNEL"
         private const val INTERRUPTION_NOTIFICATION_BASE_ID = 10_000
     }
@@ -29,7 +32,7 @@ class DcCleanerNotifier(
             "백그라운드 작업",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "삭제 및 대왕콘 얻기 작업 진행 알림"
+            description = "삭제, 방명록, 댓글 자동 정리 진행 알림"
         }
 
         val notificationManager =
@@ -41,7 +44,7 @@ class DcCleanerNotifier(
             "작업 완료 알림",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "삭제, 대왕콘, 방명록 작업 완료 및 결과 알림"
+            description = "삭제, 방명록 작업 완료 및 결과 알림"
             enableVibration(true)
         }
         notificationManager.createNotificationChannel(completionChannel)
@@ -96,8 +99,9 @@ class DcCleanerNotifier(
         notificationManager.cancel(DcCleanerService.CAPTCHA_NOTIFICATION_ID)
     }
 
-    fun showInterruptionNotification(taskId: String, title: String, contentText: String) {
-        val stableId = stableNotificationId(taskId)
+    fun showInterruptionNotification(taskId: String?, title: String, contentText: String) {
+        val stableId = taskId?.takeIf(String::isNotBlank)?.let(::stableNotificationId)
+            ?: INTERRUPTION_NOTIFICATION_BASE_ID
         val pendingIntent = PendingIntent.getActivity(
             context,
             stableId,
@@ -121,12 +125,6 @@ class DcCleanerNotifier(
 
     fun createNotification(contentText: String): Notification =
         createServiceNotification("DC 클리너", contentText, ongoing = true)
-
-    fun createDaewangconNotification(): Notification = createServiceNotification(
-        title = "DC 클리너",
-        contentText = "대왕콘 얻기 진행중",
-        ongoing = true
-    )
 
     fun createGuestbookNotification(contentText: String = "방명록 전송 준비 중..."): Notification =
         createServiceNotification("DC 클리너", contentText, ongoing = true)
@@ -188,15 +186,6 @@ class DcCleanerNotifier(
         notificationManager.notify(DcCleanerService.NOTIFICATION_ID, createNotification(contentText))
     }
 
-    fun updateDaewangconNotification() {
-        val notificationManager =
-            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(
-            DcCleanerService.NOTIFICATION_ID,
-            createDaewangconNotification()
-        )
-    }
-
     fun updateGuestbookNotification(contentText: String) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -210,34 +199,22 @@ class DcCleanerNotifier(
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(
-            DcCleanerService.NOTIFICATION_ID,
+            COMPLETION_NOTIFICATION_ID,
             createCompletionNotification(contentText)
         )
     }
 
-    fun showDaewangconCompletedNotification() {
+    fun showChargeNotification(contentText: String) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(
-            DcCleanerService.NOTIFICATION_ID,
-            createCompletionNotification("대왕콘 얻기 완료")
-        )
-    }
-
-    fun showDaewangconFailedNotification() {
-        val notificationManager =
-            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(
-            DcCleanerService.NOTIFICATION_ID,
-            createCompletionNotification("대왕콘 얻기 실패")
-        )
+        notificationManager.notify(CHARGE_NOTIFICATION_ID, createCompletionNotification(contentText))
     }
 
     fun showGuestbookCompletedNotification(successCount: Int, failCount: Int) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(
-            DcCleanerService.NOTIFICATION_ID,
+            COMPLETION_NOTIFICATION_ID,
             createCompletionNotification(
                 "방명록 전송 완료: 성공 ${successCount}명, 실패 ${failCount}명"
             )
@@ -254,7 +231,7 @@ class DcCleanerNotifier(
         Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP
-            taskId?.let { putExtra(EXTRA_RESUME_TASK_ID, it) }
+            taskId?.takeIf(String::isNotBlank)?.let { putExtra(EXTRA_RESUME_TASK_ID, it) }
         }
 
     private fun stableNotificationId(taskId: String): Int =

@@ -1,7 +1,6 @@
 package com.dccleaner.app.network
 
 import com.dccleaner.app.model.*
-import com.dccleaner.app.util.SensitiveLogSanitizer
 import okhttp3.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
@@ -70,15 +69,28 @@ data class MonitoredWrittenPost(
     val key: String get() = "$galleryId:$postNo"
 }
 
-data class MonitoredPostComment(val id: String, val content: String)
+data class MonitoredPostComment(
+    val id: String,
+    val content: String
+)
 
 internal data class MonitoredCommentPage(
     val comments: List<MonitoredPostComment>,
     val totalCount: Int
 )
 
-fun commentContainsBlockedKeyword(content: String, keywords: List<String>): Boolean =
-    keywords.any { it.isNotBlank() && content.contains(it, ignoreCase = true) }
+const val COMMENT_CLEANER_REGEX_PREFIX = "정규식:"
+
+fun commentCleanerPatterns(rules: List<String>): List<Regex> =
+    rules.filter { it.startsWith(COMMENT_CLEANER_REGEX_PREFIX) }.map { rule ->
+        val pattern = rule.removePrefix(COMMENT_CLEANER_REGEX_PREFIX).trim()
+        require(pattern.isNotEmpty()) { "빈 정규식은 사용할 수 없습니다" }
+        Regex(pattern, RegexOption.IGNORE_CASE)
+    }
+
+fun commentContainsBlockedKeyword(content: String, keywords: List<String>, patterns: List<Regex> = emptyList()): Boolean =
+    keywords.any { it.isNotBlank() && content.contains(it, ignoreCase = true) } ||
+        patterns.any { it.containsMatchIn(content) }
 
 private fun JsonObject.stringValue(key: String): String =
     this[key]?.jsonPrimitive?.content.orEmpty()
@@ -92,11 +104,10 @@ internal fun parseMonitoredCommentPage(text: String): MonitoredCommentPage? = ru
         ) return@mapNotNull null
         val id = comment.stringValue("no")
         if (id.isBlank()) return@mapNotNull null
+        val memo = comment.stringValue("memo")
         MonitoredPostComment(
             id,
-            Jsoup.parseBodyFragment(
-                comment.stringValue("memo").replace(Regex("(?i)<br\\s*/?>"), "\n")
-            ).text()
+            Jsoup.parseBodyFragment(memo.replace(Regex("(?i)<br\\s*/?>"), "\n")).text()
         )
     }
     MonitoredCommentPage(
@@ -117,13 +128,10 @@ class Cleaner private constructor(
 
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.66 Safari/537.36"
-        private const val MOBILE_USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 10; SM-G973N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Mobile Safari/537.36"
         private const val DCINSIDE_SITE_KEY =
             "6LcJyr4UAAAAAOy9Q_e9sDWPSHJ_aXus4UnYLfgL"
 
 
-        private const val MAX_DELAY = 900L // milliseconds
         const val POST_REQUEST_DELAY = 1000L // 글 요청 간 최소 1초 딜레이
         const val PAGE_REQUEST_DELAY = 900L
         private const val MAX_ATTEMPT = 5
@@ -132,15 +140,9 @@ class Cleaner private constructor(
 
         private const val BASE_URL = "https://www.dcinside.com"
         private const val GALL_BASE_URL = "https://gall.dcinside.com"
-        private const val MOBILE_BASE_URL = "https://m.dcinside.com"
-        private const val UPLOAD_URL = "https://mupload.dcinside.com/write_new.php"
         private const val GALLOG_URL = "https://gallog.dcinside.com"
         private const val TWOCAPTCHA_CHECK_URL = "https://2captcha.com/in.php"
 
-        private const val SUCCESS_MESSAGE = "success"
-        private const val ERROR_MESSAGE = "error"
-        private const val FAILED_MESSAGE = "failed"
-        private const val BLOCKED_MESSAGE = "blocked"
         private val DC_ZONE_ID: ZoneId = ZoneId.of("Asia/Seoul")
     }
 
@@ -215,23 +217,6 @@ class Cleaner private constructor(
         "User-Agent" to USER_AGENT
     )
 
-    private fun createMobileAjaxHeaders(
-        csrfToken: String,
-        referer: String,
-        userAgent: String = MOBILE_USER_AGENT
-    ): Map<String, String> = mapOf(
-        "Accept" to "*/*",
-        "Accept-Language" to "ko,en-US;q=0.9,en;q=0.8",
-        "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
-        "Sec-Fetch-Dest" to "empty",
-        "Sec-Fetch-Mode" to "cors",
-        "Sec-Fetch-Site" to "same-origin",
-        "X-Requested-With" to "XMLHttpRequest",
-        "X-CSRF-Token" to csrfToken,
-        "Referer" to referer,
-        "User-Agent" to userAgent
-    )
-
     private fun isCaptchaError(message: String): Boolean {
         return message.contains("captcha") ||
                 message.contains("g-recaptcha") ||
@@ -243,12 +228,6 @@ class Cleaner private constructor(
             "ERROR_KEY_DOES_NOT_EXIST", "ERROR_WRONG_USER_KEY" -> responseText
             else -> "응답 길이: ${responseText.length}"
         }
-
-    private fun safeFailureMessage(action: String, statusCode: Int, responseText: String): String {
-        val responseBody = responseText.trim().ifEmpty { "<빈 응답>" }
-        return "$action 실패 - HTTP $statusCode\n응답: ${SensitiveLogSanitizer.sanitize(responseBody)}"
-    }
-
 
     override fun getPostListSize(): Int = postList.size
 
@@ -278,8 +257,6 @@ class Cleaner private constructor(
         postTextMap.clear()
         postDateMap.clear()
     }
-
-    fun exportCollectedPosts(): List<CollectedPost> = exportCollectedPosts(postList.toList())
 
     override fun exportCollectedPosts(postNumbers: List<String>): List<CollectedPost> =
         postNumbers.map { postNo ->
@@ -317,65 +294,10 @@ class Cleaner private constructor(
 
     override fun getUserId(): String = userId
 
-    /** Returns the authenticated DCInside session in Set-Cookie format for an in-app WebView. */
-    fun getWebViewSessionCookies(): List<String> =
-        cookieManager.cookieStore.cookies
-            .firstOrNull { it.name.equals("PHPSESSID", ignoreCase = true) }
-            ?.value
-            ?.takeIf(String::isNotBlank)
-            ?.let { sessionId ->
-                listOf(
-                    "PHPSESSID=$sessionId; Domain=.dcinside.com; Path=/; Secure; HttpOnly"
-                )
-            }
-            .orEmpty()
-
     override fun getPostAgeDays(postNo: String): Long? {
         val postDate = getPostDate(postNo) ?: return null
         return ChronoUnit.DAYS.between(postDate, LocalDate.now(DC_ZONE_ID))
     }
-
-    /**
-     * 개별 글 삭제 (실시간 UI 업데이트용)
-     */
-    suspend fun deleteSinglePost(postType: String): DeletePostResult? =
-        withContext(Dispatchers.IO) {
-            if (postList.isEmpty()) return@withContext null
-
-            val postNo = postList.first()
-            val deleteResult = deletePost(postNo, postType, solveCaptcha = false)
-
-            return@withContext when (deleteResult) {
-                is DeleteResult.Success -> {
-                    postList.removeFirst()
-                    DeletePostResult(true, SUCCESS_MESSAGE, PostDeleteData(postNo, 0.0, false))
-                }
-
-                is DeleteResult.Error -> handleDeleteError(deleteResult, postNo, postType)
-                is DeleteResult.Excluded -> DeletePostResult(false, deleteResult.message, null)
-                is DeleteResult.Failed -> DeletePostResult(false, FAILED_MESSAGE, null)
-                is DeleteResult.Blocked -> DeletePostResult(false, BLOCKED_MESSAGE, null)
-            }
-        }
-
-    private suspend fun handleDeleteError(
-        error: DeleteResult.Error,
-        postNo: String,
-        postType: String
-    ): DeletePostResult {
-        return if (isCaptchaError(error.message) && twocaptchaKey.isNotEmpty()) {
-            val captchaResult = deletePost(postNo, postType, solveCaptcha = true)
-            if (captchaResult is DeleteResult.Success) {
-                postList.removeAt(0)
-                DeletePostResult(true, SUCCESS_MESSAGE, PostDeleteData(postNo, 0.0, true))
-            } else {
-                DeletePostResult(false, ERROR_MESSAGE, null)
-            }
-        } else {
-            DeletePostResult(false, ERROR_MESSAGE, null)
-        }
-    }
-
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun execute(request: Request): Response = suspendCancellableCoroutine { continuation ->
@@ -493,9 +415,10 @@ class Cleaner private constructor(
     suspend fun login(userId: String, userPw: String): Boolean =
         loginMutex.withLock {
             withContext(Dispatchers.IO) {
-                val normalizedUserId = userId.lowercase()
+                val trimmedUserId = userId.trim()
+                val normalizedUserId = trimmedUserId.lowercase()
                 clearSession()
-                logSink?.addLog("Cleaner", "로그인 시작: $userId")
+                logSink?.addLog("Cleaner", "로그인 시작: $trimmedUserId")
 
                 try {
 
@@ -507,7 +430,7 @@ class Cleaner private constructor(
                     val inputElements = doc.select("#login_process input[type=hidden]")
 
                     val loginData = serializeForm(inputElements)
-                    loginData["user_id"] = userId
+                    loginData["user_id"] = trimmedUserId
                     loginData["pw"] = userPw
                     loginData["ci_t"] = cookieManager.cookieStore.cookies
                         .find { it.name == "ci_c" }
@@ -575,7 +498,8 @@ class Cleaner private constructor(
             return@withContext UserInfo(
                 nickname = nickname,
                 article_num = removeBracket(articleNum),
-                comment_num = removeBracket(commentNum)
+                comment_num = removeBracket(commentNum),
+                userId = userId
             )
         } catch (e: CancellationException) {
             throw e
@@ -583,7 +507,8 @@ class Cleaner private constructor(
             return@withContext UserInfo(
                 nickname = "",
                 article_num = "0",
-                comment_num = "0"
+                comment_num = "0",
+                userId = userId
             )
         }
     }
@@ -608,6 +533,8 @@ class Cleaner private constructor(
             formData["ci_t"] = ci_t
             formData["no"] = postNo
             formData["service_code"] = "undefined"
+            val confirmQuestionPostUpfront = deleteQuestionPosts && postType == "posting"
+            if (confirmQuestionPostUpfront) formData["del_limit_ok"] = "1"
 
 
             if (solveCaptcha) {
@@ -637,6 +564,7 @@ class Cleaner private constructor(
 
             var data: JsonObject? = null
             var requestSuccessful = false
+            var needsConfirmationFallback = confirmQuestionPostUpfront
 
             for (attempt in 0 until MAX_ATTEMPT) {
                 debugLogger.d("Cleaner", "Delete attempt ${attempt + 1}/$MAX_ATTEMPT for post $postNo")
@@ -651,6 +579,11 @@ class Cleaner private constructor(
                     val responseText = deleteResponse.body.string()
 
                     debugLogger.d("Cleaner", "Delete response status=${deleteResponse.code}, length=${responseText.length}")
+
+                    if (deleteResponse.code == 200 && responseText.isBlank()) {
+                        logSink?.addLog("Cleaner", "삭제 응답이 비어 있어 제외 - postNo: $postNo")
+                        return@withContext DeleteResult.Excluded("삭제 응답이 비어 있음")
+                    }
 
                     if (isCaptchaError(responseText)) {
                         debugLogger.w("Cleaner", "Captcha required detected - skip retry")
@@ -668,6 +601,16 @@ class Cleaner private constructor(
                             val result = data["result"]?.jsonPrimitive?.content
                             val msg = data["msg"]?.jsonPrimitive?.content
                             val isAlreadyDeleted = result == "fail" && msg == "글 번호가 올바르지 않습니다."
+
+                            if (needsConfirmationFallback && result != "success" && !isAlreadyDeleted) {
+                                needsConfirmationFallback = false
+                                formData.remove("del_limit_ok")
+                                formBody = FormBody.Builder().apply {
+                                    formData.forEach { (key, value) -> add(key, value) }
+                                }.build()
+                                logSink?.addLog("Cleaner", "선제 삭제 확인이 거부되어 기존 방식으로 재시도 - postNo: $postNo")
+                                continue
+                            }
 
                             if (result == "confirm") {
                                 if (deleteQuestionPosts && "del_limit_ok" !in formData) {
@@ -719,9 +662,9 @@ class Cleaner private constructor(
 
 
                 if (attempt < MAX_ATTEMPT - 1) {
-                    debugLogger.d("Cleaner", "Retrying in 60 seconds...")
-                    logSink?.addLog("Cleaner", "60초 후 재시도...")
-                    delay(60_000)
+                    debugLogger.d("Cleaner", "Retrying in 10 seconds...")
+                    logSink?.addLog("Cleaner", "10초 후 재시도...")
+                    delay(10_000)
                 }
             }
 
@@ -757,12 +700,12 @@ class Cleaner private constructor(
 
             try {
                 val request = buildRequest(gallogUrl)
-                val response = execute(request)
-                if (!response.isSuccessful) {
-                    return@withContext -1
+                val html = execute(request).use { response ->
+                    if (!response.isSuccessful) return@withContext -1
+                    response.body.string()
                 }
-                val html = response.body.string()
                 val doc = Jsoup.parse(html)
+                if (gallogRequestedGalleryUnavailable(doc, html, gno)) return@withContext 1
 
                 var pages = 1
                 val pagingElements = doc.select(".bottom_paging_box > a")
@@ -806,19 +749,20 @@ class Cleaner private constructor(
 
         try {
             val request = buildRequest(gallogUrl)
-            val response = execute(request)
-            if (!response.isSuccessful) {
-                return@withContext if (response.code == 403) {
-                    PostListResult.Blocked
-                } else {
-                    PostListResult.Failed
+            val html = execute(request).use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext if (response.code == 403) PostListResult.Blocked else PostListResult.Failed
                 }
+                response.body.string()
             }
-            val html = response.body.string()
             val doc = Jsoup.parse(html)
 
             if (doc.selectFirst("body") == null) {
                 return@withContext PostListResult.Blocked
+            }
+
+            if (gallogRequestedGalleryUnavailable(doc, html, gno)) {
+                return@withContext PostListResult.Success(emptyList(), totalCount = 0)
             }
 
             val requestedGalleryMatched = gallogResponseMatchesRequestedGallery(html, gno)
@@ -1000,61 +944,6 @@ class Cleaner private constructor(
         }
     }
 
-    suspend fun aggregatePosts(
-        gno: String,
-        postType: String,
-        onProgress: ((current: Int, total: Int) -> Unit)? = null
-    ): List<AggregateResult> = withContext(Dispatchers.IO) {
-        val results = mutableListOf<AggregateResult>()
-        val pages = getPageCount(gno, postType)
-        postList.clear()
-        postUrlMap.clear()
-        postDcconMap.clear()
-        postTextMap.clear()
-        postDateMap.clear()
-
-        if (pages <= 0) {
-            results.add(AggregateResult(false, "network", null))
-            return@withContext results
-        }
-
-        for (idx in pages downTo 1) {
-            val currentPage = pages - idx + 1
-            onProgress?.invoke(currentPage, pages)
-
-            val startTime = System.currentTimeMillis()
-            delay(MAX_DELAY)
-            val postListResult = getPostList(gno, postType, idx)
-            val delayTime = System.currentTimeMillis() - startTime
-            val delaySec = String.format("%.1f", delayTime / 1000.0).toDouble()
-
-            when (postListResult) {
-                is PostListResult.Blocked -> {
-                    results.add(AggregateResult(false, "ipblocked", null))
-                    break
-                }
-
-                is PostListResult.Failed -> {
-                    results.add(AggregateResult(false, "network", null))
-                    break
-                }
-
-                is PostListResult.Success -> {
-                    postList.addAll(postListResult.posts)
-                    results.add(
-                        AggregateResult(
-                            true,
-                            "success",
-                            AggregateData(idx, delaySec)
-                        )
-                    )
-                }
-            }
-        }
-
-        return@withContext results
-    }
-
     private fun parseGallogDate(dateText: String?): LocalDate? {
         val text = dateText?.trim().orEmpty()
         if (text.isEmpty()) return null
@@ -1157,12 +1046,13 @@ class Cleaner private constructor(
     override suspend fun getPostWriterUid(postUrl: String): String? = withContext(Dispatchers.IO) {
         try {
             val request = buildRequest(postUrl)
-            val response = execute(request)
-            if (response.code == 404) {
-                debugLogger.d("Cleaner", "Post returned 404, treating as my post (URL: $postUrl)")
-                return@withContext userId
+            val html = execute(request).use { response ->
+                if (response.code == 404) {
+                    debugLogger.d("Cleaner", "Post returned 404, treating as my post (URL: $postUrl)")
+                    return@withContext userId
+                }
+                response.body.string()
             }
-            val html = response.body.string()
             val doc = Jsoup.parse(html)
             val writerUid = doc.selectFirst(".gall_writer[data-uid]")?.attr("data-uid") ?: ""
             debugLogger.d("Cleaner", "Post writer UID: $writerUid (URL: $postUrl)")
@@ -1228,7 +1118,7 @@ class Cleaner private constructor(
             logSink?.addLog("Cleaner", "2Captcha 해결 시작 - URL: $pageUrl")
             try {
                 val solver = TwoCaptcha(twocaptchaKey)
-                solver.setDefaultTimeout(180) // 2captcha 타임아웃 180초로 증가
+                solver.setRecaptchaTimeout(180)
                 solver.setPollingInterval(10) // 폴링 간격 10초로 증가
 
                 val captcha = ReCaptcha()
@@ -1238,7 +1128,7 @@ class Cleaner private constructor(
                 captcha.setAction("verify");
 
                 logSink?.addLog("Cleaner", "2Captcha 요청 전송 중...")
-                solver.solve(captcha)
+                runInterruptible { solver.solve(captcha) }
 
                 debugLogger.d("Cleaner", "2Captcha solved token length=${captcha.code?.length ?: 0}")
                 logSink?.addLog("Cleaner", "2Captcha 해결 완료 - 토큰 길이: ${captcha.code?.length ?: 0}")
@@ -1252,350 +1142,6 @@ class Cleaner private constructor(
                 return@withContext null
             }
         }
-
-    /**
-     * 디시인사이드 갤러리에 글 작성 (모바일 API 사용)
-     */
-    override suspend fun writePost(
-        galleryId: String,
-        subject: String,
-        content: String
-    ): WriteResult = withContext(Dispatchers.IO) {
-        logSink?.addLog("Cleaner", "글 작성 시작 - 갤러리: $galleryId, 제목: $subject")
-        try {
-            val writeUrl = "$MOBILE_BASE_URL/write/$galleryId"
-            val boardReferer = "$MOBILE_BASE_URL/board/$galleryId"
-
-            debugLogger.d("Cleaner", "Write post request prepared for gallery=$galleryId")
-
-            // 1단계: 글쓰기 페이지에서 CSRF 토큰과 히든 필드 수집
-            val writePageRequest = buildRequest(
-                url = writeUrl,
-                headers = mapOf(
-                    "Referer" to boardReferer,
-                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-                ),
-                userAgent = MOBILE_USER_AGENT
-            )
-
-            val writePageResponse = execute(writePageRequest)
-            val html = writePageResponse.body.string()
-            val doc = Jsoup.parse(html)
-
-            // CSRF 토큰 추출
-            val csrfToken = doc.select("meta[name=csrf-token]").attr("content")
-            if (csrfToken.isEmpty()) {
-                return@withContext WriteResult.Failed("CSRF 토큰을 찾을 수 없습니다")
-            }
-
-            // 폼 필드 수집
-            val fields = mutableMapOf<String, String>()
-            doc.select("#writeForm input[name], #writeForm textarea[name], #writeForm select[name]")
-                .forEach { element ->
-                    val name = element.attr("name")
-                    if (name.isNotEmpty()) {
-                        fields[name] = element.attr("value")
-                    }
-                }
-
-            // 필수 필드 설정
-            fields["id"] = galleryId
-            fields["route_id"] = galleryId
-            fields["subject"] = subject
-            fields["memo"] = content
-
-            // 허니팟 필드 처리
-            val honeyFieldName = fields.keys.find { it.startsWith("honey_") }
-            if (honeyFieldName != null) {
-                fields["GEY3JWF"] = honeyFieldName
-            }
-
-            val ajaxHeaders = createMobileAjaxHeaders(csrfToken, writeUrl)
-
-            // 2단계: /ajax/access에서 Block_key 획득 (dc_check2)
-            val accessFormData = FormBody.Builder()
-                .add("token_verify", "dc_check2")
-                .build()
-
-            val accessRequest = buildRequest(
-                url = "$MOBILE_BASE_URL/ajax/access",
-                headers = ajaxHeaders,
-                body = accessFormData,
-                userAgent = MOBILE_USER_AGENT
-            )
-
-            val accessResponse = execute(accessRequest)
-            val accessJson = accessResponse.body.string()
-
-            try {
-                val accessData = Json.parseToJsonElement(accessJson).jsonObject
-                val blockKey = accessData["Block_key"]?.toString()?.trim('\"')
-                    ?: accessData["block_key"]?.toString()?.trim('\"')
-                if (blockKey != null) {
-                    fields["Block_key"] = blockKey
-                }
-            } catch (e: Exception) {
-                debugLogger.w("Cleaner", "Failed to parse access response", e)
-            }
-
-            // 3단계: /ajax/w_filter로 스팸 필터링
-            val filterFormData = FormBody.Builder()
-                .add("subject", subject)
-                .add("memo", content)
-                .add("id", galleryId)
-                .add("mode", "write")
-                .add("is_mini", "0")
-                .add("is_person", "0")
-                .build()
-
-            val filterRequest = buildRequest(
-                url = "$MOBILE_BASE_URL/ajax/w_filter",
-                headers = ajaxHeaders,
-                body = filterFormData,
-                userAgent = MOBILE_USER_AGENT
-            )
-
-            val filterResponse = execute(filterRequest)
-            val filterJson = filterResponse.body.string()
-
-            try {
-                val filterData = Json.parseToJsonElement(filterJson).jsonObject
-                val blockKey = filterData["Block_key"]?.toString()?.trim('\"')
-                    ?: filterData["block_key"]?.toString()?.trim('\"')
-                if (blockKey != null) {
-                    fields["Block_key"] = blockKey
-                }
-            } catch (e: Exception) {
-                debugLogger.w("Cleaner", "Failed to parse filter response", e)
-            }
-
-            // dcblock 쿠키 찾기
-            val dcblockCookie = cookieManager.cookieStore.cookies
-                .find { cookie ->
-                    cookie.name.length >= 30 && cookie.name.all { it.isLetterOrDigit() }
-                }
-            if (dcblockCookie != null) {
-                fields["dcblock"] = dcblockCookie.value
-                if (!fields.containsKey("Block_key")) {
-                    fields["Block_key"] = dcblockCookie.value
-                }
-            }
-
-            // 4단계: 최종 폼 데이터 구성 및 전송
-            val finalFormData = FormBody.Builder()
-            fields.forEach { (key, value) ->
-                if (key != "files") {
-                    finalFormData.add(key, value)
-                }
-            }
-            val formBody = finalFormData.build()
-
-            val submitRequest = buildRequest(
-                url = UPLOAD_URL,
-                headers = mapOf(
-                    "Content-Type" to "application/x-www-form-urlencoded",
-                    "Referer" to writeUrl,
-                    "X-CSRF-Token" to csrfToken
-                ),
-                body = formBody,
-                userAgent = MOBILE_USER_AGENT
-            )
-
-            val response = execute(submitRequest)
-            val responseText = response.body.string()
-
-            debugLogger.d("Cleaner", "Write post response status=${response.code}, length=${responseText.length}")
-            logSink?.addLog("Cleaner", "글 작성 응답 - status: ${response.code}, 길이: ${responseText.length}")
-
-            // 응답 파싱
-            val success = response.isSuccessful &&
-                    (responseText.contains("등록되었습니다") || responseText.contains("refresh") || responseText.contains(
-                        "url="
-                    ))
-
-            if (success) {
-                logSink?.addLog("Cleaner", "글 작성 성공 - 갤러리: $galleryId")
-                return@withContext WriteResult.Success
-            } else {
-                val failureMessage = safeFailureMessage("글 작성", response.code, responseText)
-                logSink?.addLog("Cleaner", "갤러리: $galleryId, $failureMessage")
-                return@withContext WriteResult.Failed(failureMessage)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            debugLogger.e("Cleaner", "Write post error", e)
-            logSink?.addLog("Cleaner", "글 작성 예외 - 갤러리: $galleryId: ${e.message}")
-            return@withContext WriteResult.Failed(e.message ?: "Unknown error")
-        }
-    }
-
-    /**
-     * 디시인사이드 갤러리 글에 댓글 작성 (모바일 API 사용)
-     */
-    override suspend fun writeComment(
-        galleryId: String,
-        postNo: String,
-        content: String
-    ): WriteResult = withContext(Dispatchers.IO) {
-        logSink?.addLog("Cleaner", "댓글 작성 시작 - 갤러리: $galleryId, 글번호: $postNo")
-        try {
-            val postUrl = "$MOBILE_BASE_URL/board/$galleryId/$postNo"
-            val boardReferer = "$MOBILE_BASE_URL/board/$galleryId"
-
-            // 1단계: 게시글 HTML에서 CSRF 토큰과 히든 필드 수집
-            val viewRequest = buildRequest(
-                url = postUrl,
-                headers = mapOf(
-                    "Referer" to boardReferer,
-                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-                ),
-                userAgent = MOBILE_USER_AGENT
-            )
-
-            val viewResponse = execute(viewRequest)
-            val html = viewResponse.body.string()
-            val doc = Jsoup.parse(html)
-
-            // CSRF 토큰 추출
-            val csrfToken = doc.select("meta[name=csrf-token]").attr("content")
-            if (csrfToken.isEmpty()) {
-                return@withContext WriteResult.Failed("CSRF 토큰을 찾을 수 없습니다")
-            }
-
-            // 히든 필드 수집
-            val userId = doc.select("#user_id").attr("value")
-            val boardId = doc.select("#board_id").attr("value")
-            val repleId = doc.select("#reple_id").attr("value")
-            val bestChk = doc.select("#best_chk").attr("value")
-            val commentNo = doc.select("#comment_no").attr("value")
-            val cpage = doc.select("#cpage").attr("value").ifEmpty { "1" }
-            val hideRobotName = doc.select(".comment-write .hide-robot").attr("name")
-            val subject = doc.select(".gallview-tit-box .tit").first()?.text() ?: ""
-            val gallNickname = doc.select("#gall_nickname").attr("value")
-            val useGallNickname = doc.select("#use_gall_nickname").attr("value")
-
-            val ajaxHeaders = createMobileAjaxHeaders(csrfToken, postUrl)
-
-            // 2단계: /ajax/access에서 con_key 획득 (com_submit)
-            val accessFormData = FormBody.Builder()
-                .add("token_verify", "com_submit")
-                .build()
-
-            val accessRequest = buildRequest(
-                url = "$MOBILE_BASE_URL/ajax/access",
-                headers = ajaxHeaders,
-                body = accessFormData,
-                userAgent = MOBILE_USER_AGENT
-            )
-
-            val accessResponse = execute(accessRequest)
-            val accessJson = accessResponse.body.string()
-
-            var conKey = ""
-            try {
-                val accessData = Json.parseToJsonElement(accessJson).jsonObject
-                conKey = accessData["Block_key"]?.toString()?.trim('\"')
-                    ?: accessData["block_key"]?.toString()?.trim('\"')
-                            ?: accessData["con_key"]?.toString()?.trim('\"')
-                            ?: accessData["Con_key"]?.toString()?.trim('\"') ?: ""
-            } catch (e: Exception) {
-                debugLogger.w("Cleaner", "Failed to parse access response", e)
-            }
-
-            if (conKey.isEmpty()) {
-                return@withContext WriteResult.Failed("댓글 작성용 키(con_key)를 얻지 못했습니다")
-            }
-
-            // 3단계: cmtw_chk 쿠키 설정 (TypeScript와 동일하게)
-            try {
-                val cmtwChkCookie = "cmtw_chk=$conKey; Max-Age=180; Path=/"
-                val cookieUrl = java.net.HttpCookie.parse(cmtwChkCookie).firstOrNull()
-                if (cookieUrl != null) {
-                    cookieUrl.domain = "m.dcinside.com"
-                    cookieUrl.path = "/"
-                    cookieUrl.maxAge = 180
-                    val uri = java.net.URI(MOBILE_BASE_URL)
-                    cookieManager.cookieStore.add(uri, cookieUrl)
-                    debugLogger.d("Cleaner", "Set cmtw_chk cookie with con_key length=${conKey.length}")
-                }
-            } catch (e: Exception) {
-                debugLogger.w("Cleaner", "Failed to set cmtw_chk cookie", e)
-            }
-
-            // 4단계: 댓글 작성 요청 (TypeScript와 동일한 필드 순서 및 값)
-            val commentFormData = FormBody.Builder()
-                .add("comment_memo", content)
-                .add("mode", "com_write")
-                .add("comment_no", commentNo)
-                .add("comment_nick", "")
-                .add("comment_pw", "")
-                .add("id", galleryId)
-                .add("no", postNo)
-                .add("best_chk", bestChk)
-                .add("board_id", boardId)
-                .add("reple_id", repleId)
-                .add("cpage", cpage)
-
-            if (subject.isNotEmpty()) {
-                commentFormData.add("subject", subject)
-            }
-            commentFormData.add("con_key", conKey)
-
-            // 허니팟 필드 추가
-            val robotField = hideRobotName.ifEmpty { "bbcdd3" }
-            commentFormData.add(robotField, "1")
-
-            // 갤닉 필드 추가 (TypeScript와 동일)
-            if (useGallNickname.isNotEmpty()) {
-                commentFormData.add("use_gall_nickname", useGallNickname)
-            }
-            if (gallNickname.isNotEmpty() && useGallNickname == "1") {
-                commentFormData.add("gall_nickname", gallNickname)
-            }
-
-            val finalCommentBody = commentFormData.build()
-
-            val commentRequest = buildRequest(
-                url = "$MOBILE_BASE_URL/ajax/comment-write",
-                headers = ajaxHeaders,
-                body = finalCommentBody,
-                userAgent = MOBILE_USER_AGENT
-            )
-
-            val response = execute(commentRequest)
-            val responseText = response.body.string()
-
-            debugLogger.d("Cleaner", "Write comment response status=${response.code}, length=${responseText.length}")
-            logSink?.addLog("Cleaner", "댓글 작성 응답 - status: ${response.code}, 길이: ${responseText.length}")
-
-            // 응답 파싱
-            var success = false
-            try {
-                val responseData = Json.parseToJsonElement(responseText).jsonObject
-                val result = responseData["result"]?.toString()?.trim('\"')
-                success = result == "1" || result == "true"
-            } catch (e: Exception) {
-                // JSON 파싱 실패시 응답 텍스트 확인
-                success = response.isSuccessful
-            }
-
-            if (success) {
-                logSink?.addLog("Cleaner", "댓글 작성 성공 - 갤러리: $galleryId, 글번호: $postNo")
-                return@withContext WriteResult.Success
-            } else {
-                val failureMessage = safeFailureMessage("댓글 작성", response.code, responseText)
-                logSink?.addLog("Cleaner", "갤러리: $galleryId, 글번호: $postNo, $failureMessage")
-                return@withContext WriteResult.Failed(failureMessage)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            debugLogger.e("Cleaner", "Write comment error", e)
-            logSink?.addLog("Cleaner", "댓글 작성 예외 - 갤러리: $galleryId: ${e.message}")
-            return@withContext WriteResult.Failed(e.message ?: "Unknown error")
-        }
-    }
 
     /**
      * 방명록 작성
@@ -1857,152 +1403,26 @@ class Cleaner private constructor(
     }
 
     private fun formatCount(count: Int): String = "%,d".format(Locale.KOREA, count)
-
-    override suspend fun getDaewangconProgress(): DaewangconProgress? = withContext(Dispatchers.IO) {
-        try {
-            val phpSessId = cookieManager.cookieStore.cookies
-                .find { it.name == "PHPSESSID" }
-                ?.value.orEmpty()
-            val ciT = cookieManager.cookieStore.cookies
-                .find { it.name == "ci_c" }
-                ?.value.orEmpty()
-
-            if (phpSessId.isBlank() || ciT.isBlank()) {
-                logSink?.addLog("Cleaner", "대왕콘 진행도 확인 실패 - 로그인 세션 쿠키 없음")
-                return@withContext null
-            }
-
-            val formBody = FormBody.Builder()
-                .add("ci_t", ciT)
-                .add("target", "icon")
-                .build()
-            val request = buildRequest(
-                url = "$GALL_BASE_URL/dccon/lists",
-                headers = mapOf(
-                    "Accept" to "application/json, text/javascript, */*; q=0.01",
-                    "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
-                    "Cookie" to "ci_c=$ciT; PHPSESSID=$phpSessId;",
-                    "Origin" to GALL_BASE_URL,
-                    "Referer" to "$GALL_BASE_URL/",
-                    "X-Requested-With" to "XMLHttpRequest"
-                ),
-                body = formBody
-            )
-
-            execute(request).use { response ->
-                val responseText = response.body.string()
-                debugLogger.d("Cleaner", "getDaewangconProgress status=${response.code}, length=${responseText.length}")
-                if (!response.isSuccessful) {
-                    logSink?.addLog("Cleaner", "대왕콘 진행도 확인 실패 - HTTP ${response.code}")
-                    return@withContext null
-                }
-                parseDaewangconProgress(responseText)?.also { progress ->
-                    logSink?.addLog(
-                        "Cleaner",
-                        "대왕콘 진행도 확인 - 글 ${progress.postCount}/${progress.requiredPostCount}, " +
-                                "댓글 ${progress.commentCount}/${progress.requiredCommentCount}"
-                    )
-                }
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            debugLogger.e("Cleaner", "getDaewangconProgress error", e)
-            logSink?.addLog("Cleaner", "대왕콘 진행도 확인 예외: ${e.message}")
-            null
-        }
-    }
-
-    override suspend fun setBigcon(): WriteResult = withContext(Dispatchers.IO) {
-        try {
-            val phpSessId = cookieManager.cookieStore.cookies
-                .find { it.name == "PHPSESSID" }
-                ?.value.orEmpty()
-            val ciT = cookieManager.cookieStore.cookies
-                .find { it.name == "ci_c" }
-                ?.value.orEmpty()
-
-            if (phpSessId.isBlank()) {
-                return@withContext WriteResult.Failed("PHPSESSID 쿠키를 찾을 수 없습니다")
-            }
-            if (ciT.isBlank()) {
-                return@withContext WriteResult.Failed("ci_t 값을 찾을 수 없습니다")
-            }
-
-            val formBody = FormBody.Builder()
-                .add("ci_t", ciT)
-                .build()
-            val headers = mapOf(
-                "Accept" to "*/*",
-                "Accept-Language" to "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
-                "Cookie" to "PHPSESSID=$phpSessId;",
-                "Origin" to GALL_BASE_URL,
-                "Referer" to "$GALL_BASE_URL/board/view/?id=kingcon&no=1400",
-                "X-Requested-With" to "XMLHttpRequest"
-            )
-            val request = buildRequest(
-                url = "$GALL_BASE_URL/dccon/set_bigcon",
-                headers = headers,
-                body = formBody
-            )
-            val response = execute(request)
-            val responseText = response.body.string()
-
-            debugLogger.d("Cleaner", "setBigcon status=${response.code}, length=${responseText.length}")
-            logSink?.addLog("Cleaner", "대왕콘 설정 응답 - status: ${response.code}, 길이: ${responseText.length}")
-
-            if (response.isSuccessful) {
-                WriteResult.Success
-            } else {
-                val failureMessage = safeFailureMessage("대왕콘 설정", response.code, responseText)
-                logSink?.addLog("Cleaner", failureMessage)
-                WriteResult.Failed(failureMessage)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            debugLogger.e("Cleaner", "setBigcon error", e)
-            logSink?.addLog("Cleaner", "대왕콘 설정 예외: ${e.message}")
-            WriteResult.Failed(e.message ?: "Unknown error")
-        }
-    }
 }
-
-internal fun parseDaewangconProgress(responseText: String): DaewangconProgress? = runCatching {
-    val root = Json.parseToJsonElement(responseText).jsonObject
-    val bigcon = root["bigcon"]?.jsonObject ?: return null
-    val config = bigcon["config"]?.jsonObject ?: return null
-    val requiredPostCount = config["article"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
-    val requiredCommentCount = config["comment"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
-    val status = bigcon["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
-    val reportedPostCount = bigcon["article"]?.jsonPrimitive?.content?.toIntOrNull()
-    val reportedCommentCount = bigcon["comment"]?.jsonPrimitive?.content?.toIntOrNull()
-    val enabledWithoutCounts = status.equals("enabled", ignoreCase = true) &&
-            reportedPostCount == null && reportedCommentCount == null
-    val postCount = reportedPostCount ?: if (enabledWithoutCounts) 0 else return null
-    val commentCount = reportedCommentCount ?: if (enabledWithoutCounts) 0 else return null
-
-    if (postCount < 0 || commentCount < 0 || requiredPostCount <= 0 || requiredCommentCount <= 0) {
-        return null
-    }
-
-    DaewangconProgress(
-        postCount = postCount,
-        commentCount = commentCount,
-        requiredPostCount = requiredPostCount,
-        requiredCommentCount = requiredCommentCount,
-        durationHours = config["hours"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
-        status = status
-    )
-}.getOrNull()
 
 internal fun gallogResponseMatchesRequestedGallery(html: String, requestedGalleryNo: String): Boolean {
     if (requestedGalleryNo.isEmpty()) return true
-    val selectedGalleryNo = Regex(
+    return selectedGallogGalleryNo(html) == requestedGalleryNo
+}
+
+private fun selectedGallogGalleryNo(html: String): String? = Regex(
         """select_ul\([^;]*['"]filter['"]\s*,\s*['"]([^'"]*)['"]\s*\)"""
     ).find(html)?.groupValues?.getOrNull(1)
-    return selectedGalleryNo == requestedGalleryNo
+
+internal fun gallogRequestedGalleryUnavailable(
+    doc: org.jsoup.nodes.Document,
+    html: String,
+    requestedGalleryNo: String
+): Boolean {
+    if (requestedGalleryNo.isEmpty() || selectedGallogGalleryNo(html) != "") return false
+    val options = doc.select("div.option_sort.gallog > div > ul > li[data-value]")
+    return options.any { it.attr("data-value").isEmpty() } &&
+            options.none { it.attr("data-value") == requestedGalleryNo }
 }
 
 private data class CleanerRunLogCount(

@@ -1,21 +1,21 @@
 package com.dccleaner.app.ui.cleaner
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -24,12 +24,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.model.UiColors
+import com.dccleaner.app.ui.dialog.formatNumber
+import com.dccleaner.app.ui.proxy.ULTRA_COLORS
 import com.dccleaner.app.ui.theme.dccleanerSwitchColors
 
 @Composable
@@ -59,10 +69,9 @@ fun PostDeleteConditionCard(
     onDeleteQuestionPostsChange: (Boolean) -> Unit,
     minPostAgeDaysToDelete: String,
     onMinPostAgeDaysToDeleteChange: (String) -> Unit,
-    recordGuestbookLog: Boolean,
-    onRecordGuestbookLogChange: (Boolean) -> Unit,
-    onShowDeleteDialog: () -> Unit,
-    onOpenProxyCleaner: () -> Unit
+    proxySpeedPerHour: Int? = null,
+    runOnServer: Boolean = false,
+    onRequireLocal: (apply: () -> Unit) -> Unit = { it() }
 ) {
     val activeOptions = buildList {
         if (recommendFilterEnabled) add(DeleteFilterOption(DeleteFilterType.RECOMMEND, minRecommendToKeep.ifBlank { "1" }))
@@ -73,19 +82,13 @@ fun PostDeleteConditionCard(
     }
     val usesSlowFilter = recommendFilterEnabled || commentFilterEnabled || viewFilterEnabled
 
+    // 삭제 설정 시트 안에 놓이므로 카드 바탕·옆 여백 없이 시트의 갤러리 버튼과 줄을 맞춘다.
     Card(
-        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = uiColors.card),
-        border = BorderStroke(1.dp, uiColors.outline),
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         shape = RoundedCornerShape(16.dp)
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Settings, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("글 삭제 조건", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(16.dp))
+        Column(Modifier.padding(vertical = 4.dp)) {
             DeleteFilterOptionEditor(
                 uiColors = uiColors,
                 allowedTypes = listOf(
@@ -109,7 +112,8 @@ fun PostDeleteConditionCard(
                             onMinViewToKeepChange(value); onViewFilterEnabledChange(true)
                         }
                         DeleteFilterType.POST_TITLE_REGEX -> {
-                            onPostContentRegexChange(value); onPostContentFilterEnabledChange(true)
+                            val apply = { onPostContentRegexChange(value); onPostContentFilterEnabledChange(true) }
+                            if (runOnServer) onRequireLocal(apply) else apply()
                         }
                         DeleteFilterType.COMMENT_CONTENT_REGEX -> Unit
                         DeleteFilterType.AGE_DAYS -> {
@@ -128,45 +132,22 @@ fun PostDeleteConditionCard(
                     }
                 }
             )
-            Spacer(Modifier.height(20.dp))
-            NewestFirstOption(uiColors, "최근 글부터 삭제", deleteNewestFirst, onDeleteNewestFirstChange)
-            Spacer(Modifier.height(20.dp))
-            QuestionPostDeleteOption(uiColors, deleteQuestionPosts, onDeleteQuestionPostsChange)
-            Spacer(Modifier.height(20.dp))
-            DeleteSpeedSummary(uiColors, if (usesSlowFilter) "900" else "1,800", usesSlowFilter)
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = uiColors.outline)
-            Spacer(Modifier.height(20.dp))
-            DeleteStartControls(
-                uiColors,
-                recordGuestbookLog,
-                onRecordGuestbookLogChange,
-                onShowDeleteDialog,
-                onOpenProxyCleaner
-            )
+            DeleteSectionDivider(uiColors)
+            AdvancedOptions(listOf(deleteNewestFirst, deleteQuestionPosts).count { it }) {
+                DeleteSwitchRow(
+                    uiColors, "최근 글부터 삭제", "최신 글부터 한 페이지씩 지워요", deleteNewestFirst
+                ) { enabled ->
+                    if (runOnServer && enabled) onRequireLocal { onDeleteNewestFirstChange(true) } else onDeleteNewestFirstChange(enabled)
+                }
+                DeleteSwitchRow(
+                    uiColors, "질문글도 삭제하기", "차단 경고가 뜨는 질문글도 지워요", deleteQuestionPosts, onDeleteQuestionPostsChange
+                )
+            }
+            DeleteSectionDivider(uiColors)
+            // The server is halved by the same filters that halve a local run.
+            DeleteSpeedSummary(uiColors, usesSlowFilter, proxySpeedPerHour)
         }
     }
-}
-
-@Composable
-private fun QuestionPostDeleteOption(
-    uiColors: UiColors,
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Info, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("질문글도 삭제하기", fontWeight = FontWeight.Medium)
-        }
-        Switch(enabled, onEnabledChange, colors = dccleanerSwitchColors(uiColors))
-    }
-    if (enabled) DeleteOptionDescription("삭제 시 차단될 수 있다는 확인이 필요한 질문글도 삭제합니다.")
 }
 
 internal fun postDeleteConditionSummary(options: List<DeleteFilterOption>): String? {
@@ -188,55 +169,82 @@ internal fun postDeleteConditionSummary(options: List<DeleteFilterOption>): Stri
     }
     return when {
         firstStage.isNotEmpty() && secondStage.isNotEmpty() ->
-            "1차 필터 · 삭제 후보\n${firstStage.joinToString(" 그리고 ")}\n\n" +
-                "2차 필터 · 최종 대상\n${secondStage.joinToString(" 그리고 ")}\n\n" +
-                "두 필터를 모두 통과한 글만 삭제합니다."
-        firstStage.isNotEmpty() -> "삭제 필터\n${firstStage.joinToString(" 그리고 ")}"
-        secondStage.isNotEmpty() -> "삭제 필터\n${secondStage.joinToString(" 그리고 ")}"
+            "먼저 고르는 조건\n${firstStage.joinToString(" 그리고 ")}\n\n" +
+                "그중에서 지울 것\n${secondStage.joinToString(" 그리고 ")}\n\n" +
+                "두 조건을 모두 만족하는 글만 지워요"
+        firstStage.isNotEmpty() -> "지울 조건\n${firstStage.joinToString(" 그리고 ")}"
+        secondStage.isNotEmpty() -> "지울 조건\n${secondStage.joinToString(" 그리고 ")}"
         else -> null
     }
 }
 
 @Composable
-internal fun NewestFirstOption(
-    uiColors: UiColors,
-    title: String,
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit
-) {
+internal fun DeleteSectionDivider(uiColors: UiColors) {
+    HorizontalDivider(Modifier.padding(vertical = 8.dp), color = uiColors.outline)
+}
+
+/** 자주 안 쓰는 스위치를 접어 두는 줄. 켜진 게 있으면 처음부터 펼쳐 둔다. */
+@Composable
+internal fun AdvancedOptions(enabledCount: Int, content: @Composable ColumnScope.() -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(enabledCount > 0) }
     Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { expanded = !expanded }
+            .heightIn(min = 48.dp).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.SwapVert, null, tint = uiColors.primary, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(title, fontWeight = FontWeight.Medium)
-        }
-        Switch(enabled, onEnabledChange, colors = dccleanerSwitchColors(uiColors))
+        Text(
+            if (enabledCount > 0) "고급 옵션 · ${enabledCount}개 켜짐" else "고급 옵션",
+            style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+        )
+        Icon(
+            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (expanded) "고급 옵션 접기" else "고급 옵션 펼치기"
+        )
     }
-    if (enabled) DeleteOptionDescription("한 페이지씩 불러와 바로 삭제합니다.")
+    AnimatedVisibility(expanded) { Column(content = content) }
+}
+
+/** 줄 전체를 눌러도 켜고 끌 수 있는 스위치 줄. */
+@Composable
+internal fun DeleteSwitchRow(
+    uiColors: UiColors,
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            DeleteOptionDescription(description)
+        }
+        Switch(
+            checked, null, colors = dccleanerSwitchColors(uiColors),
+            modifier = Modifier.semantics { contentDescription = title }
+        )
+    }
 }
 
 @Composable
-internal fun DeleteSpeedSummary(uiColors: UiColors, hourlyCount: String, slow: Boolean) {
-    Column(
-        Modifier.fillMaxWidth()
-            .background(uiColors.primary.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-            .padding(12.dp)
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("예상 삭제 속도", fontWeight = FontWeight.Medium)
-            Text("시간당 약 ${hourlyCount}개", fontWeight = FontWeight.Bold, color = uiColors.primary)
-        }
-        if (slow) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "추가 확인 조건 사용 시 처리 시간이 늘어납니다.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+internal fun DeleteSpeedSummary(uiColors: UiColors, halved: Boolean, proxySpeedPerHour: Int? = null) {
+    // 초고속 삭제 runs on the server, so its own speed replaces the local 900/1,800 estimate.
+    val proxy = proxySpeedPerHour != null
+    val speed = proxySpeedPerHour?.let { formatNumber((if (halved) it / 2 else it).toLong()) }
+        ?: if (halved) "900" else "1,800"
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (proxy) "초고속 삭제 예상 속도 · " else "예상 속도 · ",
+            style = MaterialTheme.typography.bodyMedium, color = uiColors.textSecondary
+        )
+        Text(
+            "시간당 약 ${speed}개" + if (halved) " (조건 때문에 절반)" else "",
+            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+            color = if (proxy) ULTRA_COLORS[0] else uiColors.primary
+        )
     }
 }

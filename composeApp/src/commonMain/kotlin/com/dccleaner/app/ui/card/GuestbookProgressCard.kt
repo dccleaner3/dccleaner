@@ -1,11 +1,10 @@
 package com.dccleaner.app.ui.card
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -19,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.model.UiColors
+import com.dccleaner.app.ui.dialog.GuestbookResultSummary
 
 @Composable
 fun GuestbookProgressCard(
@@ -35,55 +35,45 @@ fun GuestbookProgressCard(
     } else {
         0f
     }
-    val logs = listOf(
-        "성공: ${successCount}명",
-        "실패: ${failCount}명",
-        "진행: ${progressDone} / ${progressTotal}"
-    )
 
     TaskProgressCard(
-        title = if (isSending) "방명록 전송 진행중" else "방명록 전송 완료",
+        title = when {
+            isSending -> "보내는 중"
+            failCount == 0 -> "모두 보냈어요"
+            else -> "${successCount}명에게 보냈어요"
+        },
         icon = Icons.AutoMirrored.Filled.Send,
         iconTint = uiColors.primary,
         primaryColor = uiColors.primary,
         backgroundColor = uiColors.surfaceVariant,
         cardColor = uiColors.card,
         outlineColor = uiColors.outline,
-        logTitle = "전송 상태",
-        logs = logs,
+        logTitle = "상세",
+        logs = emptyList(),
         canClose = !isSending,
         onClose = onClose,
         progressContent = {
             Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "$progressDone / $progressTotal 전송 완료",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        "${(progress * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = uiColors.primary
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
+                Text(
+                    "$progressDone / ${progressTotal}명",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(10.dp))
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier.fillMaxWidth(),
                     color = uiColors.primary
                 )
+                Spacer(Modifier.height(10.dp))
+                GuestbookResultSummary(uiColors, successCount, failCount)
             }
         },
         actionContent = {
             Button(
                 onClick = onClose,
                 enabled = !isSending,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = uiColors.primary),
                 shape = RoundedCornerShape(12.dp)
             ) {

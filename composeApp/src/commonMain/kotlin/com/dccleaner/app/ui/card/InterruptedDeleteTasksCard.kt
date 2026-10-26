@@ -8,21 +8,25 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskState
 import com.dccleaner.app.model.UiColors
 import com.dccleaner.app.platform.currentTimeMillis
+import com.dccleaner.app.ui.dialog.DeleteTaskRecordDialog
+import com.dccleaner.app.ui.theme.BusyIndicator
 
 @Composable
 fun InterruptedDeleteTasksCard(
@@ -32,21 +36,35 @@ fun InterruptedDeleteTasksCard(
     restoringTaskId: String?,
     focusedTaskId: String?,
     onResume: (DeleteTaskProgress) -> Unit,
-    onDelete: (DeleteTaskProgress) -> Unit
+    onDelete: (DeleteTaskProgress) -> Unit,
+    onDeleteAll: () -> Unit
 ) {
     if (tasks.isEmpty()) return
 
+    var expanded by remember { mutableStateOf(false) }
+    var showDeleteAllConfirmation by remember { mutableStateOf(false) }
+    if (showDeleteAllConfirmation) {
+        DeleteTaskRecordDialog(
+            uiColors = uiColors,
+            taskCount = tasks.size,
+            onConfirm = {
+                showDeleteAllConfirmation = false
+                if (resumeEnabled) onDeleteAll()
+            },
+            onDismiss = { showDeleteAllConfirmation = false }
+        )
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = uiColors.card),
-        border = androidx.compose.foundation.BorderStroke(1.dp, uiColors.outline),
+
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Warning, null, tint = uiColors.warningText)
                 Text(
-                    "중단된 삭제 작업",
+                    "이어할 작업",
                     modifier = Modifier.padding(start = 8.dp),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
@@ -57,7 +75,7 @@ fun InterruptedDeleteTasksCard(
             tasks.sortedWith(
                 compareByDescending<DeleteTaskProgress> { it.id == focusedTaskId }
                     .thenByDescending { it.updatedAt }
-            ).forEach { task ->
+            ).let { if (expanded) it else it.take(1) }.forEach { task ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -69,12 +87,15 @@ fun InterruptedDeleteTasksCard(
                 ) {
                     Column(Modifier.padding(14.dp)) {
                         Text(
-                            "${if (task.deleteType == "posting") "글" else "댓글"} 삭제 · " +
+                            // 함께 지우기 작업은 남은 단계까지 보여 준다(예: 댓글 → 글 삭제).
+                            listOfNotNull(task.deleteType, task.followUp?.deleteType)
+                                .joinToString(" → ") { if (it == "posting") "글" else "댓글" } + " 삭제 · " +
                                     "${task.completedGalleries}/${task.selectedGalleries.size} 갤러리",
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            "${relativeTime(task.updatedAt)} · 누적 ${task.totalDeleted}개 삭제",
+                            // 이어 삭제 두 번째 단계면 앞 단계에서 지운 개수도 합친다.
+                            "${relativeTime(task.updatedAt)} · 누적 ${task.totalDeleted + task.carriedDeletedPosts + task.carriedDeletedComments}개 삭제",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -83,7 +104,7 @@ fun InterruptedDeleteTasksCard(
                         }
                         if (task.hasPersistedQueue || task.queueSize > 0) {
                             Text(
-                                "저장된 삭제 큐 ${(task.queueSize - task.queueCursor).coerceAtLeast(0)}개 남음",
+                                "남은 항목 ${(task.queueSize - task.queueCursor).coerceAtLeast(0)}개",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = uiColors.primary
                             )
@@ -104,13 +125,13 @@ fun InterruptedDeleteTasksCard(
                         )
                         Spacer(Modifier.height(10.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
+                            Button(shape = RoundedCornerShape(12.dp),
                                 onClick = { onResume(task) },
                                 enabled = resumeEnabled,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 if (task.id == restoringTaskId) {
-                                    CircularProgressIndicator(
+                                    BusyIndicator(
                                         modifier = Modifier.size(18.dp),
                                         strokeWidth = 2.dp
                                     )
@@ -134,7 +155,7 @@ fun InterruptedDeleteTasksCard(
                                     )
                                 }
                             }
-                            OutlinedButton(
+                            TextButton(
                                 onClick = { onDelete(task) },
                                 enabled = resumeEnabled,
                                 modifier = Modifier.fillMaxWidth()
@@ -146,6 +167,19 @@ fun InterruptedDeleteTasksCard(
                 }
                 Spacer(Modifier.height(10.dp))
             }
+            if (tasks.size > 1) {
+                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (expanded) "접기" else "다른 작업 ${tasks.size - 1}개 보기")
+                }
+                TextButton(
+                    onClick = { showDeleteAllConfirmation = true },
+                    enabled = resumeEnabled,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("전체 삭제", color = uiColors.danger)
+                }
+            }
+
         }
     }
 }

@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "id": "ad-long-test-1",
+  "type": "ad",
+  "text": "디시클리너를 유용하게 사용하고 계신가요? 게시글과 댓글 정리부터 여러 갤러리 글쓰기까지 더욱 편리하게 이용할 수 있도록 계속 개선하고 있습니다.\n\nGitHub에서 별을 눌러 개발과 유지 보수를 응원해 주세요.",
+  "actionText": "보러 가기",
+  "actionUrl": "https://github.com/dccleaner3/dccleaner",
+  "backgroundColor": "#FFF4D6",
+  "textColor": "#5C4300",
+  "dismissible": true
+}

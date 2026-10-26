@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import com.dccleaner.app.network.Cleaner
+import com.dccleaner.app.model.DeletePhase
 import com.dccleaner.app.model.DeleteTaskProgress
 import com.dccleaner.app.model.DeleteTaskStartValidator
 import com.dccleaner.app.runtime.GuestbookExecutionProgress
@@ -14,12 +15,14 @@ import com.dccleaner.app.util.LogManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withTimeoutOrNull
 
 class ServiceManager(context: Context) {
     private val context = context.applicationContext
@@ -31,7 +34,6 @@ class ServiceManager(context: Context) {
     private var isUiObservationEnabled = false
     private var pendingDeletion: PendingDeletion? = null
     private var pendingResume: Pair<Cleaner, DeleteTaskProgress>? = null
-    private var pendingDaewangcon: PendingDaewangcon? = null
     private var pendingGuestbook: PendingGuestbook? = null
     private var pendingCommentCleaner: PendingCommentCleaner? = null
     val logManager = LogManager(context)
@@ -56,6 +58,9 @@ class ServiceManager(context: Context) {
     private val _currentGalleryEstimatedTimeLeft = MutableStateFlow(0L)
     val currentGalleryEstimatedTimeLeft: StateFlow<Long> = _currentGalleryEstimatedTimeLeft.asStateFlow()
 
+    private val _currentDeletionSpeedPerHour = MutableStateFlow(0)
+    val currentDeletionSpeedPerHour: StateFlow<Int> = _currentDeletionSpeedPerHour.asStateFlow()
+
     private val _nextCaptchaEstimatedTimeLeft = MutableStateFlow(0L)
     val nextCaptchaEstimatedTimeLeft: StateFlow<Long> = _nextCaptchaEstimatedTimeLeft.asStateFlow()
 
@@ -68,6 +73,9 @@ class ServiceManager(context: Context) {
     private val _currentDeleteType = MutableStateFlow("")
     val currentDeleteType: StateFlow<String> = _currentDeleteType.asStateFlow()
 
+
+    private val _itemCounts = MutableStateFlow(com.dccleaner.app.model.DeleteItemCounts())
+    val itemCounts = _itemCounts.asStateFlow()
 
     private val _deletedCount = MutableStateFlow(0)
     val deletedCount: StateFlow<Int> = _deletedCount.asStateFlow()
@@ -87,28 +95,6 @@ class ServiceManager(context: Context) {
 
     private val _captchaFlag = MutableStateFlow(false)
     val captchaFlag: StateFlow<Boolean> = _captchaFlag.asStateFlow()
-
-    // 대왕콘 관련 StateFlow
-    private val _isDaewangconRunning = MutableStateFlow(false)
-    val isDaewangconRunning: StateFlow<Boolean> = _isDaewangconRunning.asStateFlow()
-
-    private val _isDaewangconCompleted = MutableStateFlow(false)
-    val isDaewangconCompleted: StateFlow<Boolean> = _isDaewangconCompleted.asStateFlow()
-
-    private val _daewangconErrorMessage = MutableStateFlow<String?>(null)
-    val daewangconErrorMessage: StateFlow<String?> = _daewangconErrorMessage.asStateFlow()
-
-    private val _daewangconProgress = MutableStateFlow(0f)
-    val daewangconProgress: StateFlow<Float> = _daewangconProgress.asStateFlow()
-
-    private val _daewangconLog = MutableStateFlow<List<String>>(emptyList())
-    val daewangconLog: StateFlow<List<String>> = _daewangconLog.asStateFlow()
-
-    private val _daewangconPostCount = MutableStateFlow(0)
-    val daewangconPostCount: StateFlow<Int> = _daewangconPostCount.asStateFlow()
-
-    private val _daewangconCommentCount = MutableStateFlow(0)
-    val daewangconCommentCount: StateFlow<Int> = _daewangconCommentCount.asStateFlow()
 
     private val _isGuestbookSending = MutableStateFlow(false)
     val isGuestbookSending: StateFlow<Boolean> = _isGuestbookSending.asStateFlow()
@@ -145,7 +131,6 @@ class ServiceManager(context: Context) {
 
 
             executePendingDeletion()
-            executePendingDaewangcon()
             executePendingGuestbook()
             executePendingCommentCleaner()
             pendingResume?.let { (cleaner, task) ->
@@ -155,23 +140,16 @@ class ServiceManager(context: Context) {
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            val wasDaewangconActive = _isDaewangconRunning.value || pendingDaewangcon != null
             stopObservingServiceState()
             dcCleanerService = null
             isServiceBinding = false
             isServiceBound = false
             _isServiceConnected.value = false
             _isDeleting.value = false
-            _isDaewangconRunning.value = false
-            _isDaewangconCompleted.value = false
-            pendingDaewangcon = null
             pendingGuestbook = null
             _isGuestbookSending.value = false
             pendingCommentCleaner = null
             _isCommentCleanerRunning.value = false
-            if (wasDaewangconActive) {
-                _daewangconErrorMessage.value = "서비스 연결이 끊겨 대왕콘 작업이 중단되었습니다."
-            }
         }
     }
 
@@ -180,10 +158,12 @@ class ServiceManager(context: Context) {
         _progress.value = service.progress.value
         _currentGallery.value = service.currentGallery.value
         _currentGalleryEstimatedTimeLeft.value = service.currentGalleryEstimatedTimeLeft.value
+        _currentDeletionSpeedPerHour.value = service.currentDeletionSpeedPerHour.value
         _nextCaptchaEstimatedTimeLeft.value = service.nextCaptchaEstimatedTimeLeft.value
         _isTwoCaptchaConfigured.value = service.isTwoCaptchaConfigured.value
         _currentTaskLoginId.value = service.currentTaskLoginId.value
         _currentDeleteType.value = service.currentDeleteType.value
+        _itemCounts.value = service.itemCounts.value
         _deletedCount.value = service.deletedCount.value
         _totalCount.value = service.totalCount.value
         _deleteLog.value = service.deleteLog.value
@@ -191,13 +171,6 @@ class ServiceManager(context: Context) {
         _errorMessage.value = service.errorMessage.value
         _showCaptchaDialog.value = service.showCaptchaDialog.value
         _captchaFlag.value = service.captchaFlag.value
-        _isDaewangconRunning.value = service.isDaewangconRunning.value
-        _isDaewangconCompleted.value = service.isDaewangconCompleted.value
-        _daewangconErrorMessage.value = service.daewangconErrorMessage.value
-        _daewangconProgress.value = service.daewangconProgress.value
-        _daewangconLog.value = service.daewangconLog.value
-        _daewangconPostCount.value = service.daewangconPostCount.value
-        _daewangconCommentCount.value = service.daewangconCommentCount.value
         updateGuestbookProgress(service.guestbookProgress.value)
         _isGuestbookSending.value = service.isGuestbookSending.value
         _isCommentCleanerRunning.value = service.isCommentCleanerRunning.value
@@ -209,30 +182,22 @@ class ServiceManager(context: Context) {
             launch { service.progress.collect { _progress.value = it } }
             launch { service.currentGallery.collect { _currentGallery.value = it } }
             launch { service.currentGalleryEstimatedTimeLeft.collect { _currentGalleryEstimatedTimeLeft.value = it } }
+            launch { service.currentDeletionSpeedPerHour.collect { _currentDeletionSpeedPerHour.value = it } }
             launch { service.nextCaptchaEstimatedTimeLeft.collect { _nextCaptchaEstimatedTimeLeft.value = it } }
             launch { service.isTwoCaptchaConfigured.collect { _isTwoCaptchaConfigured.value = it } }
             launch { service.currentTaskLoginId.collect { _currentTaskLoginId.value = it } }
             launch { service.currentDeleteType.collect { _currentDeleteType.value = it } }
+            launch { service.itemCounts.collect { _itemCounts.value = it } }
             launch { service.deletedCount.collect { _deletedCount.value = it } }
             launch { service.totalCount.collect { _totalCount.value = it } }
             launch { service.deleteLog.collect { _deleteLog.value = it } }
             launch { service.isCompleted.collect { _isCompleted.value = it } }
-            launch { service.errorMessage.collect { _errorMessage.value = it } }
+            launch { service.errorMessage.collect { error ->
+                _errorMessage.value = error
+                if (error != null && !service.isDeleting.value) _isDeleting.value = false
+            } }
             launch { service.showCaptchaDialog.collect { _showCaptchaDialog.value = it } }
             launch { service.captchaFlag.collect { _captchaFlag.value = it } }
-
-            // 대왕콘 관련 StateFlow 연결
-            launch { service.isDaewangconRunning.collect { _isDaewangconRunning.value = it } }
-            launch { service.isDaewangconCompleted.collect { _isDaewangconCompleted.value = it } }
-            launch { service.daewangconErrorMessage.collect { _daewangconErrorMessage.value = it } }
-            launch { service.daewangconProgress.collect { _daewangconProgress.value = it } }
-            launch { service.daewangconLog.collect { _daewangconLog.value = it } }
-            launch { service.daewangconPostCount.collect { _daewangconPostCount.value = it } }
-            launch {
-                service.daewangconCommentCount.collect {
-                    _daewangconCommentCount.value = it
-                }
-            }
             launch { service.isGuestbookSending.collect { _isGuestbookSending.value = it } }
             launch { service.isCommentCleanerRunning.collect { _isCommentCleanerRunning.value = it } }
             launch { service.guestbookProgress.collect(::updateGuestbookProgress) }
@@ -290,7 +255,8 @@ class ServiceManager(context: Context) {
                 pending.commentRegexFilter,
                 pending.minPostAgeDaysToDelete,
                 pending.recordGuestbookLog,
-                pending.deleteQuestionPosts
+                pending.deleteQuestionPosts,
+                pending.followUp
             )
             pendingDeletion = null
         }
@@ -305,6 +271,23 @@ class ServiceManager(context: Context) {
         }
     }
 
+    suspend fun stopForLogout() {
+        pendingDeletion = null
+        pendingResume = null
+        pendingGuestbook = null
+        pendingCommentCleaner = null
+        val service = dcCleanerService ?: if (bindService()) {
+            withTimeoutOrNull(5_000) {
+                isServiceConnected.first { it }
+                dcCleanerService
+            } ?: error("서비스 연결을 확인하지 못했습니다. 다시 시도해 주세요.")
+        } else {
+            check(!_isDeleting.value) { "삭제 서비스에 연결하지 못했습니다. 다시 시도해 주세요." }
+            null
+        }
+        service?.stopForLogout()
+    }
+
     fun unbindService() {
         if (isServiceBound || isServiceBinding) {
             runCatching { context.unbindService(serviceConnection) }
@@ -313,7 +296,6 @@ class ServiceManager(context: Context) {
         isUiObservationEnabled = false
         isServiceBound = false
         isServiceBinding = false
-        pendingDaewangcon = null
         pendingGuestbook = null
         pendingCommentCleaner = null
         _isServiceConnected.value = false
@@ -342,7 +324,8 @@ class ServiceManager(context: Context) {
         commentRegexFilter: String = "",
         minPostAgeDaysToDelete: Int = -1,
         recordGuestbookLog: Boolean = true,
-        deleteQuestionPosts: Boolean = false
+        deleteQuestionPosts: Boolean = false,
+        followUp: DeletePhase? = null
     ): Boolean {
         if (!DeleteTaskStartValidator.hasCompleteGalleryMap(selectedGalleries, galleryMap)) {
             _errorMessage.value = "갤러리 목록을 불러온 뒤 다시 시도해 주세요."
@@ -350,9 +333,11 @@ class ServiceManager(context: Context) {
         }
         _currentTaskLoginId.value = cleaner.getUserId()
         _currentDeleteType.value = deleteType
-        startForegroundService()
-
-        if (isServiceBound) {
+        if (!isServiceBound && !bindService()) {
+            _errorMessage.value = "삭제 서비스에 연결하지 못했습니다. 다시 시도해 주세요."
+            return false
+        }
+        return if (isServiceBound) {
             startDeletionInternal(
                 cleaner,
                 selectedGalleries,
@@ -375,7 +360,8 @@ class ServiceManager(context: Context) {
                 commentRegexFilter,
                 minPostAgeDaysToDelete,
                 recordGuestbookLog,
-                deleteQuestionPosts
+                deleteQuestionPosts,
+                followUp
             )
         } else {
             pendingDeletion = PendingDeletion(
@@ -400,10 +386,11 @@ class ServiceManager(context: Context) {
                 commentRegexFilter,
                 minPostAgeDaysToDelete,
                 recordGuestbookLog,
-                deleteQuestionPosts
+                deleteQuestionPosts,
+                followUp
             )
+            true
         }
-        return true
     }
 
     fun stopDeletion() {
@@ -424,22 +411,30 @@ class ServiceManager(context: Context) {
         }
         _currentTaskLoginId.value = task.loginId
         _currentDeleteType.value = task.deleteType
-        startForegroundService()
         if (isServiceBound) {
-            resumeDeletionInternal(cleaner, task)
+            return resumeDeletionInternal(cleaner, task)
         } else {
             pendingResume = cleaner to task
         }
         return true
     }
 
-    private fun resumeDeletionInternal(cleaner: Cleaner, task: DeleteTaskProgress) {
+    private fun resumeDeletionInternal(cleaner: Cleaner, task: DeleteTaskProgress): Boolean {
         dcCleanerService?.let { service ->
+            // 앱이 화면에 없으면(Android 12+, 초고속 전환에 실패해 다시 이어 갈 때 등) 포그라운드 서비스를 시작할 수 없다.
+            // 작업 기록은 남아 있으니 앱이 죽지 않게 하고 이어하기로 다시 시작하게 한다.
+            try {
+                startForegroundService()
+            } catch (e: IllegalStateException) {
+                _errorMessage.value = "앱이 화면에 없어 삭제를 이어 하지 못했어요. 이어하기 목록에서 다시 시작해 주세요."
+                return false
+            }
             cleaner.restore2CaptchaKey(task.twoCaptchaApiKey)
             updateDeletionState(cleaner.has2CaptchaKey())
             service.setCleaner(cleaner)
             service.resumeDeletion(task)
         }
+        return true
     }
 
     fun clearError() {
@@ -452,7 +447,8 @@ class ServiceManager(context: Context) {
     }
 
     fun dismissDeletionNotification() {
-        dcCleanerService?.stopDeletion()
+        dcCleanerService?.acknowledgeDeletionResult()
+        _isCompleted.value = false
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(DcCleanerService.NOTIFICATION_ID)
@@ -463,62 +459,17 @@ class ServiceManager(context: Context) {
         dcCleanerService?.resolveCaptcha()
     }
 
+    fun useTwoCaptchaKey(key: String) {
+        // 서비스 연결을 기다리는 작업도 새 키로 시작하게 한다.
+        pendingDeletion = pendingDeletion?.copy(twoCaptchaApiKey = key)
+        pendingResume = pendingResume?.let { (cleaner, task) -> cleaner to task.copy(twoCaptchaApiKey = key) }
+        dcCleanerService?.useTwoCaptchaKey(key)
+    }
+
+    /** 초고속 삭제로 바꾸려고 직접 삭제를 끝낸다(이어하기 기록도 지운다). 서비스 연결을 기다리는 삭제는 아직 끝낼 게 없어 그대로 둔다. */
+    suspend fun stopForHandOff(): Boolean = dcCleanerService?.stopForHandOff() ?: false
+
     fun getCurrentTaskLoginId(): String = _currentTaskLoginId.value
-
-    fun startDaewangcon(
-        cleaner: Cleaner,
-        galleryId: String,
-        postNo: String,
-        postSubject: String,
-        postContent: String,
-        commentContent: String
-    ) {
-        _isDaewangconRunning.value = true
-        _isDaewangconCompleted.value = false
-        _daewangconErrorMessage.value = null
-        pendingDaewangcon = PendingDaewangcon(
-            cleaner, galleryId, postNo, postSubject, postContent, commentContent
-        )
-        if (dcCleanerService != null) {
-            executePendingDaewangcon()
-        } else if (!bindService()) {
-            pendingDaewangcon = null
-            _isDaewangconRunning.value = false
-            _daewangconErrorMessage.value = "대왕콘 작업 서비스에 연결하지 못했습니다."
-        }
-    }
-
-    fun stopDaewangcon() {
-        pendingDaewangcon = null
-        _isDaewangconRunning.value = false
-        val service = dcCleanerService
-        if (service != null) {
-            service.clearPreparedDaewangcon()
-            service.stopDaewangcon()
-        } else {
-            val stopIntent = Intent(context, DcCleanerService::class.java).apply {
-                action = DcCleanerService.ACTION_STOP_DAEWANGCON
-            }
-            context.startService(stopIntent)
-        }
-    }
-
-    fun dismissDaewangconNotification() {
-        pendingDaewangcon = null
-        _isDaewangconRunning.value = false
-        _isDaewangconCompleted.value = false
-        _daewangconErrorMessage.value = null
-        _daewangconProgress.value = 0f
-        val service = dcCleanerService
-        if (service != null) {
-            service.clearPreparedDaewangcon()
-            service.dismissDaewangconNotification()
-        } else {
-            val notificationManager =
-                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.cancel(DcCleanerService.NOTIFICATION_ID)
-        }
-    }
 
     fun startGuestbook(cleaner: Cleaner, userIds: List<String>, message: String): Boolean {
         if (userIds.isEmpty()) return false
@@ -549,7 +500,8 @@ class ServiceManager(context: Context) {
         intervalSeconds: Int,
         monitorMinutes: Int
     ): Boolean {
-        if (keywords.isEmpty() || _isCommentCleanerRunning.value) return false
+        // 실행 중에 다시 부르면 서비스가 이전 감시를 멈추고 새 설정으로 이어간다.
+        if (keywords.isEmpty()) return false
         _isCommentCleanerRunning.value = true
         pendingCommentCleaner = PendingCommentCleaner(
             cleaner,
@@ -585,29 +537,6 @@ class ServiceManager(context: Context) {
             this.action = action
         }
         context.startForegroundService(startIntent)
-    }
-
-    private fun executePendingDaewangcon() {
-        val pending = pendingDaewangcon ?: return
-        val service = dcCleanerService ?: return
-        try {
-            service.prepareDaewangcon(
-                pending.cleaner,
-                pending.galleryId,
-                pending.postNo,
-                pending.postSubject,
-                pending.postContent,
-                pending.commentContent
-            )
-            startForegroundService(DcCleanerService.ACTION_START_DAEWANGCON)
-            pendingDaewangcon = null
-        } catch (e: RuntimeException) {
-            service.clearPreparedDaewangcon()
-            pendingDaewangcon = null
-            _isDaewangconRunning.value = false
-            _daewangconErrorMessage.value =
-                "대왕콘 작업 서비스를 시작하지 못했습니다: ${e.message ?: "알 수 없는 오류"}"
-        }
     }
 
     private fun executePendingGuestbook() {
@@ -663,36 +592,48 @@ class ServiceManager(context: Context) {
         commentRegexFilter: String = "",
         minPostAgeDaysToDelete: Int = -1,
         recordGuestbookLog: Boolean = true,
-        deleteQuestionPosts: Boolean = false
-    ) {
-        dcCleanerService?.let { service ->
-            cleaner.restore2CaptchaKey(twoCaptchaApiKey)
-            updateDeletionState(cleaner.has2CaptchaKey())
-            service.setCleaner(cleaner)
-            service.startDeletion(
-                selectedGalleries,
-                deleteType,
-                galleryMap,
-                twoCaptchaApiKey,
-                recommendFilterEnabled,
-                commentFilterEnabled,
-                viewFilterEnabled,
-                postContentFilterEnabled,
-                commentContentFilterEnabled,
-                dateFilterEnabled,
-                deleteNewestFirst,
-                minRecommendToKeep,
-                minCommentToKeep,
-                minViewToKeep,
-                myPostFilterEnabled,
-                dcconOnlyFilterEnabled,
-                postContentRegex,
-                commentRegexFilter,
-                minPostAgeDaysToDelete,
-                recordGuestbookLog,
-                deleteQuestionPosts
-            )
+        deleteQuestionPosts: Boolean = false,
+        followUp: DeletePhase? = null
+    ): Boolean {
+        val service = dcCleanerService ?: run {
+            _errorMessage.value = "삭제 서비스에 연결하지 못했습니다. 다시 시도해 주세요."
+            return false
         }
+        try {
+            startForegroundService()
+        } catch (error: RuntimeException) {
+            _isDeleting.value = false
+            _errorMessage.value = "삭제 서비스를 시작하지 못했습니다. 다시 시도해 주세요."
+            return false
+        }
+        cleaner.restore2CaptchaKey(twoCaptchaApiKey)
+        updateDeletionState(cleaner.has2CaptchaKey())
+        service.setCleaner(cleaner)
+        service.startDeletion(
+            selectedGalleries,
+            deleteType,
+            galleryMap,
+            twoCaptchaApiKey,
+            recommendFilterEnabled,
+            commentFilterEnabled,
+            viewFilterEnabled,
+            postContentFilterEnabled,
+            commentContentFilterEnabled,
+            dateFilterEnabled,
+            deleteNewestFirst,
+            minRecommendToKeep,
+            minCommentToKeep,
+            minViewToKeep,
+            myPostFilterEnabled,
+            dcconOnlyFilterEnabled,
+            postContentRegex,
+            commentRegexFilter,
+            minPostAgeDaysToDelete,
+            recordGuestbookLog,
+            deleteQuestionPosts,
+            followUp
+        )
+        return true
     }
 
     private fun updateDeletionState(isTwoCaptchaConfigured: Boolean) {
@@ -706,8 +647,10 @@ class ServiceManager(context: Context) {
         _progress.value = 0f
         _currentGallery.value = ""
         _currentGalleryEstimatedTimeLeft.value = 0L
+        _currentDeletionSpeedPerHour.value = 0
         _nextCaptchaEstimatedTimeLeft.value = 0L
         _isTwoCaptchaConfigured.value = isTwoCaptchaConfigured
+        _itemCounts.value = com.dccleaner.app.model.DeleteItemCounts()
         _deletedCount.value = 0
         _totalCount.value = 0
         _deleteLog.value = emptyList()
@@ -747,16 +690,8 @@ private data class PendingDeletion(
     val commentRegexFilter: String = "",
     val minPostAgeDaysToDelete: Int = -1,
     val recordGuestbookLog: Boolean = true,
-    val deleteQuestionPosts: Boolean = false
-)
-
-private data class PendingDaewangcon(
-    val cleaner: Cleaner,
-    val galleryId: String,
-    val postNo: String,
-    val postSubject: String,
-    val postContent: String,
-    val commentContent: String
+    val deleteQuestionPosts: Boolean = false,
+    val followUp: DeletePhase? = null
 )
 
 private data class PendingGuestbook(

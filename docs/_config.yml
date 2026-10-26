@@ -25,7 +25,7 @@ defaults:
   - scope:
       path: ""
     values:
-      image: "https://github.com/user-attachments/assets/87809359-858a-40b9-92fa-ac29fd758c52"
+      image: "/assets/og-image.png"
 
 exclude:
   - README.md

@@ -20,14 +20,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,8 +53,7 @@ fun RemoteBannerCard(
 
     Card(
         modifier = Modifier
-            .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(16.dp)),
+            .fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = background),
         border = BorderStroke(1.dp, uiColors.outline)
@@ -63,7 +61,7 @@ fun RemoteBannerCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, top = 16.dp, end = 8.dp, bottom = 12.dp)
+                .padding(start = 14.dp, top = 10.dp, end = 4.dp, bottom = 8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -74,7 +72,7 @@ fun RemoteBannerCard(
                     Icons.Default.Campaign,
                     contentDescription = null,
                     tint = contentColor,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(20.dp)
                 )
                 Text(
                     text = banner.text,
@@ -82,7 +80,7 @@ fun RemoteBannerCard(
                     color = contentColor,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
-                    maxLines = if (expanded) Int.MAX_VALUE else 3,
+                    maxLines = if (expanded || banner.type == "warning") Int.MAX_VALUE else 2,
                     overflow = TextOverflow.Ellipsis,
                     onTextLayout = { result ->
                         if (!expanded) textOverflows = result.hasVisualOverflow

@@ -5,4 +5,5 @@
     <exclude domain="sharedpref" path="saved_accounts_encrypted.xml" />
     <exclude domain="sharedpref" path="twocaptcha_key_encrypted.xml" />
     <exclude domain="sharedpref" path="delete_task_secrets_encrypted.xml" />
+    <exclude domain="sharedpref" path="proxy_cleaner_encrypted.xml" />
 </full-backup-content>

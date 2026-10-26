@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -10,11 +11,12 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="com.dccleaner.permission.READ_NOW_PLAYING" />
 
     <queries>
-        <package android:name="com.dccleaner.musicbridge" />
-        <provider android:authorities="com.dccleaner.musicbridge.nowplaying" />
+        <!-- 문서 링크를 앱 안 브라우저 탭으로 열 때 지원 브라우저를 찾는다. -->
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
     </queries>
     <application
         android:allowBackup="true"
@@ -27,6 +29,7 @@
         android:theme="@style/Theme.Dccleaner">
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.Dccleaner">
@@ -45,8 +48,18 @@
             android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="DC Cleaner 백그라운드 삭제 및 대왕콘 작업" />
+                android:value="DC Cleaner 백그라운드 삭제 및 댓글 자동 정리" />
         </service>
+        <!-- 충전 신청 뒤 카카오톡에 가 있는 동안 신청서 확인·충전을 알린다(최대 30분). -->
+        <service
+            android:name=".service.ChargeWatchService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <!-- 초고속 삭제(서버 작업)가 끝났는지 약 15분마다 확인해 알림을 띄운다. -->
+        <service
+            android:name=".service.ProxyJobCheckService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 
 </manifest>

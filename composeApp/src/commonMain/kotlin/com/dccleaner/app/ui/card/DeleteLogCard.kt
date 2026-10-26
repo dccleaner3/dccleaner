@@ -22,8 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -38,10 +36,9 @@ fun DeleteLogCard(
 
     Card(
         modifier = Modifier
-            .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(16.dp)),
+            .fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = cardColor),
-        border = androidx.compose.foundation.BorderStroke(1.dp, uiColors.outline),
+
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(
@@ -61,7 +58,7 @@ fun DeleteLogCard(
                     "삭제 로그",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = primaryColor
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
 

@@ -9,27 +9,9 @@ data class ProxyCleanerPricing(
     val baseUnitPrice: Double,
     val minimumPrice: Int,
     val deletionsPerSecond: Double,
-    val completedDeletionCount: Long,
-    val completedDeletionCountAsOf: String,
     val tiers: List<ProxyCleanerPricingTier>,
     val kakaoOpenChatUrl: String
-) {
-    companion object {
-        val Fallback = ProxyCleanerPricing(
-            baseUnitPrice = 0.1,
-            minimumPrice = 5_000,
-            deletionsPerSecond = 1.0,
-            completedDeletionCount = 877_322L,
-            completedDeletionCountAsOf = "2026-09-12",
-            tiers = listOf(
-                ProxyCleanerPricingTier(1, 10_000, 1.0),
-                ProxyCleanerPricingTier(10_001, 50_000, 0.6),
-                ProxyCleanerPricingTier(50_001, null, 0.2)
-            ),
-            kakaoOpenChatUrl = "https://open.kakao.com/"
-        )
-    }
-}
+)
 
 @Immutable
 data class ProxyCleanerPricingTier(
@@ -45,7 +27,9 @@ data class ProxyCleanerQuote(
     val originalPrice: Int,
     val finalPrice: Int,
     val discountPercent: Int,
-    val estimatedSeconds: Long
+    val estimatedSeconds: Long,
+    /** Preview only. Purchases use the server's confirmed count and payment amount. */
+    val creditedCount: Long
 )
 
 fun ProxyCleanerPricing.calculateQuote(postCount: Int, commentCount: Int): ProxyCleanerQuote {
@@ -61,7 +45,9 @@ fun ProxyCleanerPricing.calculateQuote(postCount: Int, commentCount: Int): Proxy
             tier.fixedPrice?.toDouble() ?: countInTier * baseUnitPrice * tier.unitPriceMultiplier
         }
     }
-    val finalPrice = ceil(calculatedPrice.coerceAtLeast(minimumPrice.toDouble())).toInt()
+    // 서버 _deletion_quote와 같다: 원 단위로 올린 뒤 100원 미만 절사, 최소 결제액 아래로는 내리지 않는다.
+    val finalPrice = (ceil(calculatedPrice.coerceAtLeast(minimumPrice.toDouble())).toInt() / 100 * 100)
+        .coerceAtLeast(minimumPrice)
     val originalPrice = ceil(totalCount * baseUnitPrice).toInt()
     val discountPercent = if (originalPrice > 0 && finalPrice < originalPrice) {
         ((1.0 - finalPrice.toDouble() / originalPrice) * 100).roundToInt().coerceIn(0, 100)
@@ -73,5 +59,8 @@ fun ProxyCleanerPricing.calculateQuote(postCount: Int, commentCount: Int): Proxy
     } else {
         ceil(totalCount / deletionsPerSecond).toLong()
     }
-    return ProxyCleanerQuote(totalCount, originalPrice, finalPrice, discountPercent, estimatedSeconds)
+    val creditedCount = if (totalCount == 0) 0L else if (calculatedPrice < minimumPrice && baseUnitPrice > 0) {
+        maxOf(totalCount.toLong(), kotlin.math.floor(minimumPrice / baseUnitPrice + 1e-7).toLong())
+    } else totalCount.toLong()
+    return ProxyCleanerQuote(totalCount, originalPrice, finalPrice, discountPercent, estimatedSeconds, creditedCount)
 }

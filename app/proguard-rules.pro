@@ -3,7 +3,7 @@
 # proguardFiles setting in build.gradle.
 
 # Keep stack trace information for crash reports
--keepattributes SourceFile,LineNumberTable
+-keepattributes SourceFile,LineNumberTable,Signature,*Annotation*,InnerClasses,EnclosingMethod
 -renamesourcefileattribute SourceFile
 
 # OkHttp
@@ -12,12 +12,11 @@
 -keep class okhttp3.** { *; }
 -keep interface okhttp3.** { *; }
 
-# Gson - keep data classes used for JSON serialization
+# Gson persists these unannotated model field names across app updates.
 -keepclassmembers class * {
     @com.google.gson.annotations.SerializedName <fields>;
 }
--keep class com.dccleaner.app.SavedAccount { *; }
--keep class com.dccleaner.app.UserInfo { *; }
+-keep class com.dccleaner.app.model.** { *; }
 
 # Jsoup
 -keep public class org.jsoup.** { *; }

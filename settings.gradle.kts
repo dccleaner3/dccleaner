@@ -22,5 +22,3 @@ dependencyResolutionManagement {
 rootProject.name = "dccleaner"
 include(":composeApp")
 include(":app")
-include(":musicContract")
-include(":musicBridge")

@@ -1,2 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- 갤창랭킹을 만드는 동안 앱을 내려도 멈추지 않게 붙잡는다. 권한은 앱 매니페스트에 있다. -->
+        <service
+            android:name="com.dccleaner.app.ranking.GalleryRankingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>
