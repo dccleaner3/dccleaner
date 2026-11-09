@@ -36,6 +36,10 @@ faq:
 - Android는 백그라운드에서 계속 동작
 - Android · PC
 
+<p align="center">
+  <img src="./assets/comment-auto-delete.png" alt="디시 댓글 자동삭제: 차단할 단어를 넣고 켠 디시클리너 댓글 자동 정리 화면" width="280">
+</p>
+
 👉 [디시 댓글 자동삭제 설정법 보기](./comment-auto-delete.html)
 
 ---
@@ -52,6 +56,10 @@ faq:
 - Android는 이미 보낸 사람을 자동으로 빼요
 - Android · PC
 
+<p align="center">
+  <img src="./assets/guestbook.png" alt="디시 방명록 한 번에 보내기: 식별코드 목록과 메시지를 넣은 디시클리너 방명록 화면" width="280">
+</p>
+
 👉 [디시 방명록 한 번에 보내는 법 보기](./guestbook.html)
 
 ---
@@ -63,9 +71,13 @@ faq:
 갤러리 주소만 넣으면 하루·주·달 단위로 **시간순·글순·댓글순** 순위를 만들어요. 이미지로 저장하거나 텍스트로 복사해서 바로 올릴 수 있어요.
 
 - 정식·마이너·미니 갤러리 모두 돼요
-- 카드형·표형 이미지, 하루 타임라인
+- 순위 카드 이미지, 하루 타임라인
 - 집계된 사람들을 방명록 받는 사람으로 바로 넣기
 - Android · PC
+
+<p align="center">
+  <img src="./assets/gallery-ranking-result.png" alt="디시 갤창랭킹 결과 이미지: 활동시간 순위 1~3위와 갤 요약" width="280">
+</p>
 
 👉 [디시 갤창랭킹 만드는 법 보기](./gallery-ranking.html)
 
@@ -81,6 +93,10 @@ faq:
 - 갤로그 주소를 붙여 넣어도 돼요
 - Android · PC
 
+<p align="center">
+  <img src="./assets/user-posts-result.png" alt="디시 반고닉 글 검색 결과: 식별코드로 찾은 작성글 목록" width="280">
+</p>
+
 👉 [디시 반고닉 글 검색하는 법 보기](./user-posts.html)
 
 ---
@@ -88,6 +104,10 @@ faq:
 ## 🗑️ 기본 기능: 내 글·댓글 삭제
 
 디시클리너의 기본 기능이에요. **클리너** 탭에서 내가 쓴 게시글과 댓글을 갤러리·기간·추천 수 조건으로 골라 한 번에 지워요.
+
+<p align="center">
+  <img src="./assets/screenshot.png" alt="디시 글·댓글 일괄삭제: 지울 게시글·댓글과 갤러리를 고르는 디시클리너 클리너 화면" width="280">
+</p>
 
 👉 [소개 페이지](./) · [삭제·캡챠 도움말](./help.html#delete)
 

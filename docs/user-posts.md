@@ -3,6 +3,7 @@ layout: default
 title: "디시 반고닉 글 검색 – 식별코드·유동 IP로 작성글 모아보기"
 description: "디시 반고닉·고닉 글 검색, 글 목록을 한 장씩 넘기며 찾지 마세요. 디시클리너 반고닉 글 찾기에 갤러리 주소와 식별코드(또는 유동 IP 앞 두 자리와 닉네임)를 넣으면 그 사람이 쓴 작성글만 골라 최신순으로 모아 줘요."
 permalink: /user-posts.html
+image: /assets/user-posts-og.png
 howto:
   name: "디시클리너로 디시 반고닉 글 검색하는 법"
   steps:

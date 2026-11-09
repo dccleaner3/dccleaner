@@ -70,7 +70,7 @@ permalink: /help.html
 
 네. **클리너** 탭의 **게시글**과 **댓글**을 둘 다 체크하면 함께 지워요.
 
-- 각 줄의 **설정**에서 갤러리와 조건을 따로 정해요.
+- 각 줄의 **설정**에서 갤러리와 조건을 따로 정해요. 갤러리 목록에는 마이너·미니 갤러리 표시가 붙어요(처음에는 갤러리마다 하나씩 확인해서, 선택 창의 갤러리 수 옆과 목록 위 막대로 진행이 보여요).
 - 초고속 삭제는 서버에서 한 번에 지워요.
 - 일반 삭제는 한쪽을 다 지운 뒤 이어서 다른 쪽을 지워요. **순서 바꾸기**로 무엇을 먼저 지울지 정해요.
 
@@ -79,7 +79,7 @@ permalink: /help.html
 Android에서는 화면을 끄거나 다른 앱을 써도 백그라운드에서 계속 삭제해요.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/4d4426fe-be5d-44a6-b745-c9156c6bfd54" alt="Android 백그라운드 삭제 화면" width="360">
+  <img src="./assets/help-background-delete.png" alt="디시클리너 삭제 진행 화면: 진행률, 남은 시간, 삭제 속도, 다음 캡챠와 닫기 · 다른 기능 쓰면서 계속 삭제 버튼" width="300">
 </p>
 
 ### 삭제가 중간에 멈췄어요 {#resume}
@@ -93,7 +93,7 @@ Android에서는 화면을 끄거나 다른 앱을 써도 백그라운드에서 
 ### 캡챠를 직접 해결하려면 어떻게 하나요? {#captcha}
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/d9d1d84d-77e1-4c1e-8da6-6eeea22917a5" alt="캡챠 해결 안내 화면" width="360">
+  <img src="./assets/help-captcha.png" alt="디시클리너 캡챠 해결 필요 창: 직접 해결하기 안내와 갤로그 열기, 해결 후 재개 버튼" width="300">
 </p>
 
 1. 캡챠 창에서 **직접 해결하기**를 고르고 **갤로그 열기**를 누르세요.
