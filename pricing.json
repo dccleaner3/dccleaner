@@ -1,7 +1,7 @@
 {
-  "baseUnitPrice": 0.2,
+  "baseUnitPrice": 0.3,
   "minimumPrice": 1000,
-  "deletionsPerSecond": 3.0,
+  "deletionsPerSecond": 2.5,
   "kakaoOpenChatUrl": "https://open.kakao.com/o/srjxdlWi",
   "tiers": [
     {
@@ -17,7 +17,7 @@
     {
       "minCount": 50001,
       "maxCount": null,
-      "unitPriceMultiplier": 0.35
+      "unitPriceMultiplier": 0.3
     }
   ]
 }
