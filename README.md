@@ -51,13 +51,13 @@ Android, Windows, macOS에서 쓰는 무료 오픈소스 프로그램이에요.
 직접 삭제 중에 충전하면 바로 초고속 삭제로 바꿔 시작할 수 있어요. ([도움말](https://dccleaner3.github.io/dccleaner/help.html#ultra-switch))
 
 ### 🧹 댓글 자동 정리
-내가 새로 쓴 글에 정한 단어가 들어간 댓글이 달리면 자동으로 지워요. 디시 앱·웹에서 쓴 글도 돼요. ([디시 댓글 자동삭제](https://dccleaner3.github.io/dccleaner/comment-auto-delete.html))
+내가 새로 쓴 글에 정한 단어·사람·디시콘이 든 댓글이 달리면 자동으로 지워요. 디시 앱·웹에서 쓴 글도 돼요. ([디시 댓글 자동삭제](https://dccleaner3.github.io/dccleaner/comment-auto-delete.html))
 
 ### 💬 방명록 한 번에 보내기
 여러 사람의 방명록에 같은 글을 한 번에 남겨요. 갤창랭킹에서 뽑은 식별코드를 받는 사람으로 바로 넣을 수 있고, Android에서는 이미 보낸 사람이 자동으로 빠져요. ([사용법](https://dccleaner3.github.io/dccleaner/guestbook.html))
 
 ### 🏆 갤창랭킹
-갤러리에서 누가 제일 활발했는지 기간별 순위를 만들어 이미지나 텍스트로 공유해요. ([디시 갤창랭킹 만들기](https://dccleaner3.github.io/dccleaner/gallery-ranking.html))
+갤러리에서 누가 제일 활발했는지 기간별 순위를 만들어 이미지나 텍스트로 공유해요. 받은 댓글·개념글·디시콘·무플 글·글댓비 등 순위, 갤 대문, 갤 요약, 부문별 1위, 인기글, 키워드 구름도 넣을 수 있어요. ([디시 갤창랭킹 만들기](https://dccleaner3.github.io/dccleaner/gallery-ranking.html))
 
 ### 🔎 반고닉 글 찾기
 식별코드나 유동 IP로 한 사람이 갤러리에 쓴 글만 골라 모아 봐요. ([디시 반고닉 글 검색](https://dccleaner3.github.io/dccleaner/user-posts.html))
