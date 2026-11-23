@@ -1,5 +1,5 @@
 {
-  "baseUnitPrice": 0.1,
+  "baseUnitPrice": 0.4,
   "minimumPrice": 1000,
   "deletionsPerSecond": 2.5,
   "kakaoOpenChatUrl": "https://open.kakao.com/o/srjxdlWi",
