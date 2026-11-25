@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>디시 글·댓글 삭제 시간·금액 계산 | 디시클리너</title>
+<meta name="description" content="지울 디시 글·댓글 수를 고르면 일반 삭제(무료)와 초고속 삭제의 걸리는 시간, 금액, 시간당 이용 금액을 비교해 드려요. 아이폰처럼 앱 없이 맡기는 경우도 계산돼요.">
+<link rel="canonical" href="https://dccleaner3.github.io/dccleaner/estimate.html">
+<meta property="og:title" content="디시 글·댓글 삭제 시간·금액 계산 | 디시클리너">
+<meta property="og:description" content="일반 삭제와 초고속 삭제의 시간·금액을 바로 비교해 보세요.">
+<meta property="og:url" content="https://dccleaner3.github.io/dccleaner/estimate.html">
+<meta property="og:image" content="https://dccleaner3.github.io/dccleaner/assets/og-image.png">
+<meta property="og:locale" content="ko_KR">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#0969da">
+<style>
+:root {
+  --bg: #f2f4f6; --card: #ffffff; --text: #191f28; --sub: #6b7684; --faint: #8b95a1;
+  --line: #e5e8eb; --chip: #f2f4f6; --blue: #3182f6; --blue-weak: #e8f3ff; --blue-text: #1b64da;
+  --green: #12805c; --orange: #b25e00;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17171c; --card: #212127; --text: #f2f4f6; --sub: #a3a9b1; --faint: #7e858e;
+    --line: #34343c; --chip: #2c2c35; --blue: #4c95ff; --blue-weak: #1f2b40; --blue-text: #8fbcff;
+    --green: #4cc38a; --orange: #ffb44c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17171c; --card: #212127; --text: #f2f4f6; --sub: #a3a9b1; --faint: #7e858e;
+  --line: #34343c; --chip: #2c2c35; --blue: #4c95ff; --blue-weak: #1f2b40; --blue-text: #8fbcff;
+  --green: #4cc38a; --orange: #ffb44c;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  word-break: keep-all; overflow-wrap: break-word; -webkit-font-smoothing: antialiased;
+}
+main { max-width: 560px; margin: 0 auto; padding: 20px 16px 48px; }
+a { color: var(--blue-text); }
+.brand { display: inline-block; font-size: 15px; font-weight: 700; color: var(--sub); text-decoration: none; padding: 8px 0; }
+h1 { font-size: 26px; line-height: 1.35; margin: 12px 0 8px; letter-spacing: -0.02em; }
+.lead { margin: 0 0 24px; color: var(--sub); font-size: 15px; line-height: 1.6; }
+.card { background: var(--card); border-radius: 20px; padding: 20px; margin-bottom: 12px; }
+.label { font-size: 15px; font-weight: 700; margin: 0 0 12px; }
+.chips { display: grid; grid-template-columns: repeat(5, 1fr) 1.7fr; gap: 6px; }
+.chip {
+  font: inherit; font-size: 15px; font-weight: 600; border: 0; cursor: pointer;
+  padding: 10px 4px; min-height: 44px; border-radius: 12px; white-space: nowrap; background: var(--chip); color: var(--text);
+}
+.chip[aria-pressed="true"] { background: var(--blue); color: #fff; }
+.custom { display: none; margin-top: 12px; align-items: center; gap: 8px; }
+.custom.show { display: flex; }
+.custom input {
+  font: inherit; font-size: 17px; font-weight: 600; width: 100%; min-height: 48px; padding: 0 14px;
+  border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); color: var(--text);
+}
+.custom input:focus { outline: none; border-color: var(--blue); }
+.custom span { font-size: 15px; color: var(--sub); white-space: nowrap; }
+.switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; }
+.switch-text strong { display: block; font-size: 15px; }
+.switch-text small { display: block; margin-top: 2px; color: var(--sub); font-size: 13px; line-height: 1.5; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.track { flex: none; width: 50px; height: 30px; border-radius: 15px; background: var(--line); position: relative; transition: background .15s; }
+.track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 12px; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.switch input:checked + .track { background: var(--blue); }
+.switch input:checked + .track::after { transform: translateX(20px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--blue); outline-offset: 2px; }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.col { border-radius: 16px; padding: 16px 14px; background: var(--chip); }
+.col.fast { background: var(--blue-weak); }
+.compare.single { grid-template-columns: 1fr; }
+.offline { margin: 0 0 8px; padding: 12px 14px; border-radius: 12px; background: var(--chip); color: var(--sub); font-size: 14px; }
+.col h2 { font-size: 16px; margin: 0 0 2px; }
+.col.fast h2 { color: var(--blue-text); }
+.col .note { font-size: 12px; color: var(--sub); margin: 0 0 14px; line-height: 1.5; }
+@media (max-width: 480px) { .col .note { min-height: 36px; } }
+.row { margin-top: 12px; }
+.row dt { font-size: 12px; color: var(--sub); }
+.compare.single { align-items: start; }
+.compare.single .note { min-height: 0 !important; }
+.summary span { display: block; font-weight: 500; color: var(--sub); }
+.row dd { margin: 2px 0 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.col.fast .row dd { color: var(--text); }
+.row dd small { display: block; font-size: 12px; font-weight: 500; color: var(--sub); margin-top: 1px; }
+.summary { margin: 16px 2px 0; font-size: 15px; font-weight: 600; line-height: 1.6; }
+.summary b { color: var(--blue-text); }
+.cta {
+  display: flex; align-items: center; justify-content: center; min-height: 54px; margin-top: 16px;
+  border-radius: 14px; background: var(--blue); color: #fff; font-size: 16px; font-weight: 700; text-decoration: none;
+}
+.cta-sub { margin: 8px 0 0; text-align: center; font-size: 14px; color: var(--sub); line-height: 1.5; }
+.foot { margin: 20px 4px 0; font-size: 13px; color: var(--sub); line-height: 1.7; }
+.foot p { margin: 0 0 4px; }
+.error { color: var(--orange); font-size: 15px; line-height: 1.6; margin: 0; }
+.error button { display: block; margin-top: 12px; font: inherit; font-weight: 700; color: var(--blue-text); background: var(--chip); border: 0; border-radius: 12px; min-height: 44px; padding: 0 16px; cursor: pointer; }
+@media (max-width: 339px) { .compare { grid-template-columns: 1fr; } .col .note { min-height: 0; } .chips { grid-template-columns: repeat(5, 1fr); } .chip[data-count="custom"] { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<main>
+  <a class="brand" href="./">디시클리너</a>
+  <h1>삭제 시간·금액 계산</h1>
+  <p class="lead">지울 글·댓글 수를 고르면 일반 삭제와 초고속 삭제를 비교해 드려요.</p>
+
+  <section class="card" aria-labelledby="count-label">
+    <p class="label" id="count-label">지울 글·댓글 수</p>
+    <div class="chips" role="group" aria-labelledby="count-label">
+      <button type="button" class="chip" data-count="5000" aria-pressed="false">5천</button>
+      <button type="button" class="chip" data-count="10000" aria-pressed="true">1만</button>
+      <button type="button" class="chip" data-count="30000" aria-pressed="false">3만</button>
+      <button type="button" class="chip" data-count="50000" aria-pressed="false">5만</button>
+      <button type="button" class="chip" data-count="100000" aria-pressed="false">10만</button>
+      <button type="button" class="chip" data-count="custom" aria-pressed="false">직접 입력</button>
+    </div>
+    <div class="custom" id="custom">
+      <input id="custom-input" inputmode="numeric" autocomplete="off" placeholder="예: 32,000" aria-label="지울 글·댓글 수">
+      <span>개</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <label class="switch">
+      <span class="switch-text">
+        <strong>앱 없이 이용 (아이폰 등)</strong>
+        <small>카카오톡으로 맡기면 대신 지워 드려요 · 초고속 금액 + 3,000원</small>
+      </span>
+      <input type="checkbox" id="no-app">
+      <span class="track" aria-hidden="true"></span>
+    </label>
+  </section>
+
+  <section class="card" aria-live="polite">
+    <div id="result"><p class="foot" style="margin:0">가격표를 불러오는 중이에요…</p></div>
+  </section>
+
+  <div class="foot">
+    <p>금액은 앱 충전 탭과 같은 가격표로 계산해요. 시간당 이용 금액은 금액을 걸리는 시간으로 나눈 값이에요.</p>
+    <p>일반 삭제는 시간당 약 1,800개 기준이고, 캡챠를 푸는 시간은 빠져 있어요. 실제 시간은 갤러리 수와 조건에 따라 달라질 수 있어요.</p>
+    <p><a href="./help.html#ultra">초고속 삭제 도움말</a> · <a href="./help.html#ultra-iphone">앱 없이 신청하는 방법</a></p>
+  </div>
+</main>
+
+<script id="calc">
+// 앱(ProxyCleanerPricing.calculateQuote·ProxyCleanerText.kt)과 같은 계산. 바꾸면 앱 쪽도 같이 본다.
+var DIRECT_PER_HOUR = 1800;
+var NO_APP_EXTRA = 3000;
+
+function quotePrice(p, count) {
+  var calc = 0;
+  p.tiers.forEach(function (t) {
+    if (count < t.minCount) return;
+    var end = Math.min(count, t.maxCount == null ? count : t.maxCount);
+    var inTier = Math.max(end - t.minCount + 1, 0);
+    calc += t.fixedPrice != null ? t.fixedPrice : inTier * p.baseUnitPrice * t.unitPriceMultiplier;
+  });
+  var price = Math.floor(Math.ceil(Math.max(calc, p.minimumPrice)) / 100) * 100;
+  return Math.max(price, p.minimumPrice);
+}
+
+function fastSeconds(p, count) { return count <= 0 || p.deletionsPerSecond <= 0 ? 0 : Math.ceil(count / p.deletionsPerSecond); }
+function directSeconds(count) { return Math.round(count * 3600 / DIRECT_PER_HOUR); }
+
+function approxDuration(s, step) {
+  step = step || 10;
+  if (s <= 0) return "0분";
+  if (s < 60) return "1분 미만";
+  var m = s < 3600 ? Math.floor((s + 30) / 60) : Math.floor((s + step * 30) / (step * 60)) * step;
+  var h = Math.floor(m / 60), mm = m % 60;
+  if (h >= 24) {
+    var parts = [Math.floor(h / 24) + "일"];
+    if (h % 24) parts.push(h % 24 + "시간");
+    if (mm) parts.push(mm + "분");
+    return parts.join(" ");
+  }
+  if (h === 0) return mm + "분";
+  return mm === 0 ? h + "시간" : h + "시간 " + mm + "분";
+}
+function quoteDuration(s) {
+  if (s < 86400) return approxDuration(s, 10);
+  var tenths = Math.floor((s * 10 + 43200) / 86400);
+  return "약 " + Math.floor(tenths / 10) + (tenths % 10 ? "." + (tenths % 10) : "") + "일";
+}
+// 초고속 시간은 짧게 보이지 않게 올린다(1시간 미만 1분, 하루 미만 10분, 그 위 0.1일 단위). 일반 삭제는 10분 단위 반올림.
+function proxyDuration(s) {
+  var step = s < 3600 ? 60 : s < 86400 ? 600 : 8640;
+  return quoteDuration(Math.ceil(s / step) * step);
+}
+// 화면에 보이는 값(위 반올림·올림을 한 뒤)의 초. "N 더 빨라요"는 보이는 두 시간의 차이로 계산해 숫자가 맞게 한다.
+function shownQuoteSeconds(s) {
+  if (s < 60) return s;
+  if (s < 3600) return Math.floor((s + 30) / 60) * 60;
+  if (s < 86400) return Math.floor((s + 300) / 600) * 600;
+  return Math.floor((s * 10 + 43200) / 86400) * 8640;
+}
+function shownProxySeconds(s) {
+  var step = s < 3600 ? 60 : s < 86400 ? 600 : 8640;
+  return shownQuoteSeconds(Math.ceil(s / step) * step);
+}
+// 두 보이는 시간의 차이는 다시 반올림하지 않는다(하루 미만은 분까지 그대로).
+function exactDuration(s) {
+  if (s >= 86400) return quoteDuration(s);
+  var m = Math.round(s / 60), h = Math.floor(m / 60), mm = m % 60;
+  if (h === 0) return mm + "분";
+  return mm === 0 ? h + "시간" : h + "시간 " + mm + "분";
+}
+// 시간당 이용 금액 = 금액 ÷ 걸리는 시간(10원 단위 반올림).
+function perHour(price, seconds) { return seconds <= 0 ? 0 : Math.round(price * 3600 / seconds / 10) * 10; }
+</script>
+<script>
+var PRICING_URL = "https://raw.githubusercontent.com/dccleaner3/dccleaner/main/pricing.json";
+var KAKAO_FALLBACK = "https://open.kakao.com/o/srjxdlWi";
+var MAX_COUNT = 9999999;
+var pricing = null, count = 10000, noApp = false;
+
+function won(n) { return n.toLocaleString("ko-KR") + "원"; }
+function num(n) { return n.toLocaleString("ko-KR"); }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+function validPricing(p) {
+  return p && typeof p.baseUnitPrice === "number" && typeof p.minimumPrice === "number" &&
+    typeof p.deletionsPerSecond === "number" && Array.isArray(p.tiers) && p.tiers.length > 0 &&
+    p.tiers.every(function (t) { return typeof t.minCount === "number" && typeof t.unitPriceMultiplier === "number"; });
+}
+
+function loadPricing() {
+  document.getElementById("result").innerHTML = '<p class="foot" style="margin:0">가격표를 불러오는 중이에요…</p>';
+  fetch(PRICING_URL, { cache: "no-cache" })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (p) { if (!validPricing(p)) throw new Error("bad"); pricing = p; render(); })
+    .catch(function () {
+      document.getElementById("result").innerHTML =
+        '<p class="error">가격표를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.<button type="button" id="retry">다시 불러오기</button></p>';
+      document.getElementById("retry").onclick = loadPricing;
+    });
+}
+
+function render() {
+  if (!pricing) return;
+  var box = document.getElementById("result");
+  if (!(count > 0)) { box.innerHTML = '<p class="foot" style="margin:0">지울 글·댓글 수를 넣어 주세요.</p>'; return; }
+  var dSec = directSeconds(count), fSec = fastSeconds(pricing, count);
+  var fPrice = quotePrice(pricing, count) + (noApp ? NO_APP_EXTRA : 0);
+  var kakao = typeof pricing.kakaoOpenChatUrl === "string" && pricing.kakaoOpenChatUrl.indexOf("https://open.kakao.com/") === 0
+    ? pricing.kakaoOpenChatUrl : KAKAO_FALLBACK;
+  var saved = shownQuoteSeconds(dSec) - shownProxySeconds(fSec);
+
+  var hourLabel = '<dt>시간당 이용 금액</dt>';
+  var direct = '<div class="col"><h2>일반 삭제</h2><p class="note">5분마다 캡챠 풀기 · 기기를 켜 두기</p>' +
+    '<dl class="row"><dt>걸리는 시간</dt><dd>' + quoteDuration(dSec) + '<small>+ 캡챠 푸는 시간</small></dd></dl>' +
+    '<dl class="row"><dt>금액</dt><dd>무료</dd></dl>' +
+    '<dl class="row">' + hourLabel + '<dd>0원</dd></dl></div>';
+
+  var fast = '<div class="col fast"><h2>초고속 삭제</h2><p class="note">' +
+    (noApp ? "카카오톡으로 맡기면 끝 · 캡챠 없음" : "캡챠 없음 · 앱을 꺼도 계속") + '</p>' +
+    '<dl class="row"><dt>걸리는 시간</dt><dd>' + proxyDuration(fSec) + '</dd></dl>' +
+    '<dl class="row"><dt>금액</dt><dd>' + won(fPrice) + (noApp ? '<small>앱 가격 + 3,000원</small>' : '') + '</dd></dl>' +
+    '<dl class="row">' + hourLabel + '<dd>' + won(perHour(fPrice, fSec)) + '</dd></dl></div>';
+
+  var compare = noApp
+    ? '<p class="offline">일반 삭제는 앱이 있어야 쓸 수 있어요</p><div class="compare single">' + fast + '</div>'
+    : '<div class="compare">' + direct + fast + '</div>' +
+      '<p class="summary">초고속이 <b>' + exactDuration(saved) + '</b> 더 빨라요<span>캡챠 없이, 기기를 켜 두지 않아도 돼요</span></p>';
+
+  var cta = noApp
+    ? '<a class="cta" href="' + esc(kakao) + '" target="_blank" rel="noopener">카카오톡으로 신청하기</a>' +
+      '<p class="cta-sub">지울 글·댓글 수를 알려 주시면 금액을 확인해 드려요</p>'
+    : '<a class="cta" href="https://github.com/dccleaner3/dccleaner/releases/latest" target="_blank" rel="noopener">무료로 앱 받기</a>' +
+      '<p class="cta-sub">초고속은 앱에서 ' + won(pricing.minimumPrice) + '부터 신청해요<br>Android · Windows · macOS</p>';
+
+  box.innerHTML = compare + cta;
+}
+
+document.querySelectorAll(".chip").forEach(function (chip) {
+  chip.addEventListener("click", function () {
+    document.querySelectorAll(".chip").forEach(function (c) { c.setAttribute("aria-pressed", String(c === chip)); });
+    var custom = chip.dataset.count === "custom";
+    document.getElementById("custom").classList.toggle("show", custom);
+    if (custom) {
+      var input = document.getElementById("custom-input");
+      input.focus();
+      count = parseInt(input.value.replace(/[^0-9]/g, ""), 10) || 0;
+    } else {
+      count = parseInt(chip.dataset.count, 10);
+    }
+    render();
+  });
+});
+document.getElementById("custom-input").addEventListener("input", function (e) {
+  var digits = e.target.value.replace(/[^0-9]/g, "").replace(/^0+/, "");
+  var n = Math.min(parseInt(digits, 10) || 0, MAX_COUNT);
+  e.target.value = n ? num(n) : "";
+  count = n;
+  render();
+});
+document.getElementById("no-app").addEventListener("change", function (e) { noApp = e.target.checked; render(); });
+if (/(^|[?&])iphone=1/.test(location.search)) { document.getElementById("no-app").checked = true; noApp = true; }
+loadPricing();
+</script>
+</body>
+</html>
